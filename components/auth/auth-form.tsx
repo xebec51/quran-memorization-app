@@ -1,11 +1,14 @@
 import { LogIn, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { productConfig } from "@/lib/config";
 
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <Card className="mx-auto max-w-md">
+      <p className="mb-2 text-sm font-medium text-[var(--primary)]">{productConfig.name}</p>
       <h1 className="text-2xl font-semibold">{mode === "login" ? "Masuk" : "Buat Akun"}</h1>
+      <p className="mt-1 text-sm text-[var(--muted)]">{productConfig.tagline}</p>
       <form action={`/api/auth/${mode}`} method="post" className="mt-5 grid gap-4">
         {mode === "register" ? (
           <label className="grid gap-1 text-sm font-medium">

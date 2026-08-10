@@ -4,8 +4,19 @@ import { productConfig } from "@/lib/config";
 import { SiteShell } from "@/components/layout/site-shell";
 
 export const metadata: Metadata = {
-  title: productConfig.name,
-  description: "Latihan hafalan Al-Quran mode Expert dengan siklus 604 halaman dan petunjuk progresif.",
+  title: {
+    default: productConfig.fullTitle,
+    template: `%s · ${productConfig.name}`
+  },
+  applicationName: productConfig.name,
+  description: productConfig.description,
+  openGraph: {
+    title: productConfig.fullTitle,
+    description: productConfig.tagline,
+    siteName: productConfig.name,
+    locale: "id_ID",
+    type: "website"
+  },
   other: {
     google: "notranslate"
   }

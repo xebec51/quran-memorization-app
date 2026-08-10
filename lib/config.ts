@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 export const productConfig = {
-  name: process.env.APP_NAME || "Quran Memorization",
+  name: "Tasmiq",
+  fullTitle: "Tasmiq — Latihan Musabaqah Hifzhil Qur'an",
+  tagline: "Uji hafalan. Kenali kelemahan. Siapkan musabaqah.",
+  description:
+    "Latihan Musabaqah Hifzhil Qur'an berbasis siklus 604 halaman, petunjuk progresif, dan analitik hafalan.",
   difficultyName: "Expert",
   packagesPerCycle: 151,
   questionsPerPackage: 4,

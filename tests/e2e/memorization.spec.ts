@@ -5,7 +5,7 @@ test("critical memorization flow", async ({ page, request, context }, testInfo) 
   const password = "e2e-password-123";
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Quran Memorization" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tasmiq — Latihan Musabaqah Hifzhil Qur'an" })).toBeVisible();
 
   await page.goto("/register");
   await expect(page.getByRole("heading", { name: "Buat Akun" })).toBeVisible();

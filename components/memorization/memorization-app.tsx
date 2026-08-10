@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Eye, Lightbulb, MapPinned, BookMarked, StepForward, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { productConfig } from "@/lib/config";
 
 type Question = {
   id: string;
@@ -105,7 +106,7 @@ export function MemorizationApp() {
       <Card className="grid gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Latihan Expert</h1>
-          <p className="mt-1 text-[var(--muted)]">Mulai atau lanjutkan paket hafalan empat soal.</p>
+          <p className="mt-1 text-[var(--muted)]">{productConfig.tagline}</p>
         </div>
         <Button onClick={loadPackage}>Mulai latihan</Button>
       </Card>

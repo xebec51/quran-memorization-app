@@ -1,4 +1,8 @@
-# Quran Memorization
+# Tasmiq
+
+Tasmiq — Latihan Musabaqah Hifzhil Qur'an.
+
+Uji hafalan. Kenali kelemahan. Siapkan musabaqah.
 
 A production-oriented Quran memorization web app in Bahasa Indonesia. The primary experience is Expert memorization testing with progressive hints, persistent cycles, history, analytics, and a simple Quran reader.
 

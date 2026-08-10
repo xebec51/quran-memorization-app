@@ -1,7 +1,7 @@
 {
   "name": "quran-memorization-app",
   "version": "1.0.0",
-  "description": "A web-based Quran memorization testing platform with randomized expert challenges, progressive hints, and memorization analytics.",
+  "description": "Tasmiq — Latihan Musabaqah Hifzhil Qur'an with expert memorization challenges and analytics.",
   "private": true,
   "type": "module",
   "scripts": {

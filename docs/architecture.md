@@ -1,6 +1,6 @@
 # Architecture
 
-Quran Memorization is a Next.js App Router application with a domain-first backend.
+Tasmiq is a Next.js App Router application with a domain-first backend for Musabaqah Hifzhil Qur'an preparation.
 
 ## Runtime Boundaries
 

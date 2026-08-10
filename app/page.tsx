@@ -9,9 +9,9 @@ export default function HomePage() {
     <div className="grid gap-8 pb-20 md:grid-cols-[1.15fr_0.85fr] md:items-center">
       <section className="py-6 md:py-12">
         <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--accent)]">Mode {productConfig.difficultyName}</p>
-        <h1 className="max-w-3xl text-4xl font-semibold leading-tight md:text-6xl">{productConfig.name}</h1>
+        <h1 className="max-w-3xl text-4xl font-semibold leading-tight md:text-6xl">{productConfig.fullTitle}</h1>
         <p className="mt-5 max-w-2xl text-lg leading-8 text-[var(--muted)]">
-          Latihan hafalan Al-Quran yang fokus, tenang, dan terukur. Setiap siklus menguji 604 halaman Madani Mushaf tanpa pengulangan halaman utama.
+          {productConfig.tagline} Setiap siklus menguji 604 halaman Madani Mushaf tanpa pengulangan halaman utama.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
           <Link href="/memorization">

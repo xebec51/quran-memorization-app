@@ -46,6 +46,10 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
           </Link>
         ))}
       </nav>
+      <footer className="mx-auto max-w-6xl px-4 pb-24 pt-8 text-sm text-[var(--muted)] md:pb-8">
+        <p className="font-medium text-[var(--foreground)]">{productConfig.fullTitle}</p>
+        <p className="mt-1">{productConfig.tagline}</p>
+      </footer>
     </div>
   );
 }
