@@ -1,0 +1,270 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum CycleState {
+  ACTIVE
+  COMPLETED
+}
+
+enum PackageState {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum QuestionState {
+  ACTIVE
+  ANSWER_REVEALED
+  ASSESSED
+}
+
+enum JuzBand {
+  A
+  B
+  C
+}
+
+enum PagePositionBucket {
+  START
+  MIDDLE
+  END
+}
+
+enum HintType {
+  JUZ
+  SURAH
+  EXTEND_FRAGMENT
+  NEXT_VERSE
+}
+
+enum RecallAssessment {
+  CORRECT
+  PARTIAL
+  MISSED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  sessions    Session[]
+  cycles      MemorizationCycle[]
+  packages    MemorizationPackage[]
+  questions   MemorizationQuestion[]
+  hintEvents  HintEvent[]
+  assessments QuestionAssessment[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model QuranChapter {
+  id                 Int     @id
+  nameArabic         String
+  nameSimple         String
+  nameTransliterated String
+  translatedName     String?
+  versesCount        Int
+  revelationPlace    String?
+  bismillahPre       Boolean @default(false)
+
+  verses QuranVerse[]
+}
+
+model QuranPage {
+  pageNumber Int     @id
+  juzBand    JuzBand
+  firstJuz   Int
+  lastJuz    Int
+  wordCount  Int
+  source     String  @default("quran-foundation-content-api")
+
+  verses    QuranVerse[]
+  words     QuranWord[]
+  questions MemorizationQuestion[]
+
+  @@index([juzBand])
+}
+
+model QuranVerse {
+  id                Int     @id
+  verseKey          String  @unique
+  chapterId         Int
+  verseNumber       Int
+  globalOrder       Int     @unique
+  juzNumber         Int
+  pageNumber        Int
+  textUthmani       String
+  textUthmaniSimple String?
+
+  chapter QuranChapter @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  page    QuranPage    @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  words   QuranWord[]
+
+  @@unique([chapterId, verseNumber])
+  @@index([pageNumber, globalOrder])
+  @@index([juzNumber])
+}
+
+model QuranWord {
+  id           Int     @id
+  verseId      Int
+  verseKey     String
+  position     Int
+  globalOrder  Int     @unique
+  pageNumber   Int
+  lineNumber   Int?
+  textUthmani  String
+  charTypeName String
+  location     String?
+
+  verse QuranVerse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  page  QuranPage  @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+
+  @@unique([verseId, position])
+  @@index([pageNumber, globalOrder])
+  @@index([verseKey])
+}
+
+model QuranSyncRun {
+  id          String    @id @default(cuid())
+  source      String
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  status      String
+  message     String?
+  chapters    Int       @default(0)
+  pages       Int       @default(0)
+  verses      Int       @default(0)
+  words       Int       @default(0)
+}
+
+model MemorizationCycle {
+  id            String     @id @default(cuid())
+  userId        String
+  cycleNumber   Int
+  state         CycleState @default(ACTIVE)
+  seed          String
+  plan          Json
+  nextPackageNo Int        @default(1)
+  startedAt     DateTime   @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  packages  MemorizationPackage[]
+  questions MemorizationQuestion[]
+
+  @@unique([userId, cycleNumber])
+  @@index([userId, state])
+}
+
+model MemorizationPackage {
+  id            String       @id @default(cuid())
+  userId        String
+  cycleId       String
+  packageNumber Int
+  state         PackageState @default(IN_PROGRESS)
+  startedAt     DateTime     @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  user      User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle     MemorizationCycle      @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  questions MemorizationQuestion[]
+
+  @@unique([cycleId, packageNumber])
+  @@index([userId, createdAt])
+}
+
+model MemorizationQuestion {
+  id                  String             @id @default(cuid())
+  userId              String
+  cycleId             String
+  packageId           String
+  orderInPackage      Int
+  state               QuestionState      @default(ACTIVE)
+  primaryPageNumber   Int
+  juzNumber           Int
+  juzBand             JuzBand
+  surahId             Int
+  anchorVerseId       Int
+  anchorVerseKey      String
+  pagePositionBucket  PagePositionBucket
+  fragmentStartWordId Int
+  initialWordCount    Int
+  visibleWordCount    Int
+  maxExtensionCount   Int                @default(3)
+  maxNextVerseCount   Int                @default(3)
+  answerRevealedAt    DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle       MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  package     MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  primaryPage QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
+  hintEvents  HintEvent[]
+  assessment  QuestionAssessment?
+
+  @@unique([cycleId, primaryPageNumber])
+  @@unique([packageId, orderInPackage])
+  @@index([userId, createdAt])
+  @@index([anchorVerseId])
+}
+
+model HintEvent {
+  id         String   @id @default(cuid())
+  userId     String
+  questionId String
+  type       HintType
+  ordinal    Int
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, type, ordinal])
+  @@index([userId, createdAt])
+}
+
+model QuestionAssessment {
+  id         String           @id @default(cuid())
+  userId     String
+  questionId String           @unique
+  assessment RecallAssessment
+  createdAt  DateTime         @default(now())
+
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
