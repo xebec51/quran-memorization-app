@@ -1,7 +1,15 @@
 import type { Metadata, Viewport } from "next";
+import { Amiri_Quran } from "next/font/google";
 import "./globals.css";
 import { productConfig } from "@/lib/config";
 import { SiteShell } from "@/components/layout/site-shell";
+
+const quranFont = Amiri_Quran({
+  weight: "400",
+  subsets: ["arabic"],
+  display: "swap",
+  variable: "--font-quran"
+});
 
 export const metadata: Metadata = {
   title: {
@@ -30,7 +38,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="id" translate="no">
-      <body>
+      <body className={quranFont.variable}>
         <SiteShell>{children}</SiteShell>
       </body>
     </html>
