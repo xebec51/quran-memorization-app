@@ -26,8 +26,8 @@ type PackageDto = {
 
 type HintLine = { questionId: string; type: string; text: string };
 
-export function MemorizationApp() {
-  const [pkg, setPkg] = useState<PackageDto | null>(null);
+export function MemorizationApp({ initialPackage = null }: { initialPackage?: PackageDto | null }) {
+  const [pkg, setPkg] = useState<PackageDto | null>(initialPackage);
   const [activeIndex, setActiveIndex] = useState(0);
   const [hints, setHints] = useState<HintLine[]>([]);
   const [answer, setAnswer] = useState<null | { surah: string; verseKey: string; juz: number; page: number; text: string; continuation: string[] }>(null);
@@ -90,6 +90,12 @@ export function MemorizationApp() {
     setPkg(data);
     setAnswer(null);
     if (activeIndex < data.questions.length - 1) setActiveIndex(activeIndex + 1);
+  }
+
+  function goToNextQuestion() {
+    if (!pkg || activeIndex >= pkg.questions.length - 1) return;
+    setAnswer(null);
+    setActiveIndex(activeIndex + 1);
   }
 
   if (loading) return <Card>Memuat latihan...</Card>;
@@ -169,9 +175,14 @@ export function MemorizationApp() {
             ))}
           </div>
         ) : null}
-        <Button onClick={reveal}>
-          <Eye aria-hidden className="h-4 w-4" /> Lihat Jawaban
-        </Button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button onClick={reveal}>
+            <Eye aria-hidden className="h-4 w-4" /> Lihat Jawaban
+          </Button>
+          <Button variant="secondary" onClick={goToNextQuestion} disabled={activeIndex >= pkg.questions.length - 1}>
+            <StepForward aria-hidden className="h-4 w-4" /> Soal selesai dijawab
+          </Button>
+        </div>
         {answer ? (
           <div className="grid gap-3 rounded-md border border-[var(--border)] p-4">
             <p className="text-sm text-[var(--muted)]">{answer.surah} · {answer.verseKey} · Juz {answer.juz} · Halaman {answer.page}</p>

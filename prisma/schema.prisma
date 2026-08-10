@@ -148,6 +148,7 @@ model QuranWord {
 
   @@unique([verseId, position])
   @@index([pageNumber, globalOrder])
+  @@index([verseId, globalOrder])
   @@index([verseKey])
 }
 
@@ -202,6 +203,7 @@ model MemorizationPackage {
 
   @@unique([cycleId, packageNumber])
   @@index([userId, createdAt])
+  @@index([userId, state, createdAt])
 }
 
 model MemorizationQuestion {
@@ -253,6 +255,7 @@ model HintEvent {
   question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@unique([questionId, type, ordinal])
+  @@index([questionId, type])
   @@index([userId, createdAt])
 }
 

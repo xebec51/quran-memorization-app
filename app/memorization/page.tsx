@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth/session";
+import { getCurrentPackage } from "@/lib/memorization/service";
 import { MemorizationApp } from "@/components/memorization/memorization-app";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,5 +19,6 @@ export default async function MemorizationPage() {
       </Card>
     );
   }
-  return <MemorizationApp />;
+  const initialPackage = await getCurrentPackage(user.id);
+  return <MemorizationApp initialPackage={initialPackage} />;
 }

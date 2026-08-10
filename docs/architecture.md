@@ -4,7 +4,7 @@ Tasmiq is a Next.js App Router application with a domain-first backend for Musab
 
 ## Runtime Boundaries
 
-Browser code receives only public challenge DTOs: question id, order, visible fragment, hint availability, reveal state, and assessment state. Surah, ayah, page, juz, anchor verse, fragment offsets, and answer continuation remain in PostgreSQL until a user explicitly requests the corresponding hint or answer reveal.
+Browser code receives only public challenge DTOs: question id, order, visible fragment, hint availability, reveal state, and assessment state. Surah, ayah, page, juz, anchor verse, ayah-start source metadata, and answer continuation remain in PostgreSQL until a user explicitly requests the corresponding hint or answer reveal.
 
 Quran Foundation credentials are read only by server-side scripts/provider code through `QF_CLIENT_ID`, `QF_CLIENT_SECRET`, and `QF_ENV`.
 

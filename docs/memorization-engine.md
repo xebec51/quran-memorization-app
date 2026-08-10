@@ -37,7 +37,11 @@ The four questions are shuffled so order does not reveal the band pattern.
 
 ## Fragment Selection
 
-Question prompts choose a page-position bucket (`START`, `MIDDLE`, `END`) and select contiguous canonical words from an anchor ayah. The initial visible fragment is usually 4-7 words. Selection is deterministic under an injected seeded RNG in tests and uses secure randomness in production allocation.
+Question prompts choose a page-position bucket (`START`, `MIDDLE`, `END`) to vary where the tested page is represented. After the page area is selected, the generator chooses a suitable ayah whose beginning lies in, overlaps, or best represents that area.
+
+The prompt itself always starts at the first word of the selected ayah. It never starts from the middle of an ayah or from an arbitrary word offset. The initial visible fragment is usually 4-7 contiguous canonical words when the ayah is long enough. Short ayat are shortened safely without combining unrelated text.
+
+Selection is deterministic under an injected seeded RNG in tests and uses secure randomness in production allocation.
 
 ## Hints
 
@@ -45,7 +49,7 @@ Hints are independent:
 
 - `JUZ`: reveals only `Juz N`, once.
 - `SURAH`: reveals only the surah name, once.
-- `EXTEND_FRAGMENT`: progressively increases visible contiguous words, initially limited to 3 requests.
+- `EXTEND_FRAGMENT`: progressively increases visible contiguous words from the same ayah beginning, initially limited to 3 requests.
 - `NEXT_VERSE`: reveals the next complete ayah by canonical order, initially limited to 3 requests.
 
 Hint-only pages never consume primary page eligibility.

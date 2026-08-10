@@ -13,6 +13,7 @@ A production-oriented Quran memorization web app in Bahasa Indonesia. The primar
 - Every package covers Juz 1-10, Juz 11-20, and Juz 21-30, plus one quota-safe wildcard.
 - A full cycle consumes all 604 Madani Mushaf pages exactly once as primary question pages.
 - Hints: Juz, Surah, progressive fragment extension, and next ayah.
+- Question prompts always begin at the first word of the selected ayah while still varying the represented page area.
 - Answer reveal and self-assessment: Benar, Sebagian benar, Belum ingat.
 - User-specific history and analytics.
 - Quran reader by surah, juz, and page.

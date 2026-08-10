@@ -37,6 +37,7 @@ test("critical memorization flow", async ({ page, request, context }, testInfo) 
 
   await expect(page.getByText(/Paket 1/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByLabel("Pertanyaan").getByRole("button")).toHaveCount(4);
+  await expect(page.getByRole("button", { name: "Soal selesai dijawab" })).toBeVisible();
 
   await page.getByRole("button", { name: "Juz" }).click();
   await expect(page.getByText(/Petunjuk Juz/)).toBeVisible();
@@ -53,7 +54,7 @@ test("critical memorization flow", async ({ page, request, context }, testInfo) 
   await page.getByRole("button", { name: "Lihat Jawaban" }).click();
   await expect(page.getByText(/Halaman/)).toBeVisible();
   await page.getByRole("button", { name: "Sebagian benar" }).click();
-  await expect(page.getByText(/Soal|Latihan Expert/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Latihan Expert" })).toBeVisible();
 
   await page.goto("/analytics");
   await expect(page.getByRole("heading", { name: "Analitik" })).toBeVisible();

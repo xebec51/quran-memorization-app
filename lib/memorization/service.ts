@@ -23,9 +23,9 @@ export async function getOrAllocateNextPackage(userId: string) {
         const existing = await tx.memorizationPackage.findFirst({
           where: { userId, cycleId: cycle.id, state: "IN_PROGRESS" },
           orderBy: { packageNumber: "desc" },
-          include: { questions: { orderBy: { orderInPackage: "asc" }, include: { hintEvents: true, assessment: true } } }
+          include: packageDtoInclude
         });
-        if (existing) return packageDto(tx, existing.id, userId);
+        if (existing) return packageDtoFromRecord(tx, existing);
 
         if (cycle.nextPackageNo > productConfig.packagesPerCycle) {
           await tx.memorizationCycle.update({
@@ -46,10 +46,11 @@ export async function getOrAllocateNextPackage(userId: string) {
 export async function getCurrentPackage(userId: string) {
   const pkg = await prisma.memorizationPackage.findFirst({
     where: { userId, state: "IN_PROGRESS" },
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
+    include: packageDtoInclude
   });
   if (!pkg) return null;
-  return packageDto(prisma, pkg.id, userId);
+  return packageDtoFromRecord(prisma, pkg);
 }
 
 export async function requestQuestionHint(userId: string, questionId: string, type: HintType) {
@@ -58,42 +59,64 @@ export async function requestQuestionHint(userId: string, questionId: string, ty
       async (tx) => {
         const question = await tx.memorizationQuestion.findFirst({
           where: { id: questionId, userId },
-          include: { hintEvents: true }
+          include: { hintEvents: true, assessment: true }
         });
         if (!question) throw new Error("Pertanyaan tidak ditemukan.");
         if (question.state === "ASSESSED") throw new Error("Pertanyaan sudah dinilai.");
 
         const existingOfType = question.hintEvents.filter((event) => event.type === type);
         if ((type === "JUZ" || type === "SURAH") && existingOfType[0]) {
-          return { hint: existingOfType[0].payload, question: await publicQuestionDto(tx, question.id, userId) };
+          return {
+            hint: existingOfType[0].payload,
+            question: await publicQuestionDto(tx, question.id, userId)
+          };
         }
         assertHintLimit(type, existingOfType.length);
         const ordinal = existingOfType.length + 1;
 
         if (type === "JUZ") {
           const payload = projectJuzHint(question.juzNumber);
-          await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
-          return { hint: payload, question: await publicQuestionDto(tx, question.id, userId) };
+          const event = await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
+          return {
+            hint: payload,
+            question: await publicQuestionWithEvents(tx, question, [event])
+          };
         }
 
         if (type === "SURAH") {
           const chapter = await tx.quranChapter.findUniqueOrThrow({ where: { id: question.surahId } });
           const payload = projectSurahHint(`${chapter.nameTransliterated} (${chapter.nameArabic})`);
-          await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
-          return { hint: payload, question: await publicQuestionDto(tx, question.id, userId) };
+          const event = await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
+          return {
+            hint: payload,
+            question: await publicQuestionWithEvents(tx, question, [event])
+          };
         }
 
         if (type === "EXTEND_FRAGMENT") {
-          const visibleWordCount = question.visibleWordCount + 2;
-          const words = await wordsFromQuestionStart(tx, question.id, visibleWordCount);
-          const safeVisibleCount = words.length;
-          const payload = projectExtensionHint({ ordinal, visibleWords: words });
+          const wordsByVerse = await wordsByVerseIds(tx, [question.anchorVerseId]);
+          const verseWords = wordsByVerse.get(question.anchorVerseId) ?? [];
+          const safeVisibleCount = Math.min(question.visibleWordCount + 2, verseWords.length);
+          const payload = projectExtensionHint({
+            ordinal,
+            visibleWords: verseWords.slice(0, safeVisibleCount)
+          });
           await tx.memorizationQuestion.update({
             where: { id: question.id },
             data: { visibleWordCount: safeVisibleCount }
           });
-          await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
-          return { hint: payload, question: await publicQuestionDto(tx, question.id, userId) };
+          const event = await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
+          return {
+            hint: payload,
+            question: publicQuestionFromRecord(
+              {
+                ...question,
+                visibleWordCount: safeVisibleCount,
+                hintEvents: [...question.hintEvents, event]
+              },
+              wordsByVerse
+            )
+          };
         }
 
         const anchor = await tx.quranVerse.findUniqueOrThrow({ where: { id: question.anchorVerseId } });
@@ -107,8 +130,11 @@ export async function requestQuestionHint(userId: string, questionId: string, ty
           verseKey: nextVerse.verseKey,
           textUthmani: nextVerse.textUthmani
         });
-        await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
-        return { hint: { ...payload, verseKey: undefined }, question: await publicQuestionDto(tx, question.id, userId) };
+        const event = await tx.hintEvent.create({ data: { userId, questionId, type, ordinal, payload } });
+        return {
+          hint: { ...payload, verseKey: undefined },
+          question: await publicQuestionWithEvents(tx, question, [event])
+        };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 30_000 }
     )
@@ -121,17 +147,15 @@ export async function revealAnswer(userId: string, questionId: string) {
     include: { assessment: true }
   });
   if (!question) throw new Error("Pertanyaan tidak ditemukan.");
-  const [chapter, anchorVerse, continuation] = await Promise.all([
+  const [chapter, anchorVerse] = await Promise.all([
     prisma.quranChapter.findUniqueOrThrow({ where: { id: question.surahId } }),
-    prisma.quranVerse.findUniqueOrThrow({ where: { id: question.anchorVerseId } }),
-    prisma.quranVerse.findUniqueOrThrow({ where: { id: question.anchorVerseId } }).then((anchor) =>
-      prisma.quranVerse.findMany({
-        where: { globalOrder: { gt: anchor.globalOrder } },
-        orderBy: { globalOrder: "asc" },
-        take: 2
-      })
-    )
+    prisma.quranVerse.findUniqueOrThrow({ where: { id: question.anchorVerseId } })
   ]);
+  const continuation = await prisma.quranVerse.findMany({
+    where: { globalOrder: { gt: anchorVerse.globalOrder } },
+    orderBy: { globalOrder: "asc" },
+    take: 2
+  });
   await prisma.memorizationQuestion.update({
     where: { id: question.id },
     data: { state: "ANSWER_REVEALED", answerRevealedAt: question.answerRevealedAt ?? new Date() }
@@ -234,8 +258,15 @@ async function allocatePackage(
     }
   });
 
+  const wordsByPage = await wordRefsForPackagePages(
+    tx,
+    planPackage.questions.map((question) => question.pageNumber)
+  );
+  const questionRows = [];
+
   for (const [index, planned] of planPackage.questions.entries()) {
-    const words = await pageWordRefs(tx, planned.pageNumber);
+    const words = wordsByPage.get(planned.pageNumber);
+    if (!words) throw new Error(`Words for page ${planned.pageNumber} were not loaded`);
     const source = generateQuestionSource({
       primaryPageNumber: planned.pageNumber,
       assignedBand: planned.juzBand,
@@ -243,25 +274,24 @@ async function allocatePackage(
       preferredBucket: nextBucket(index),
       rng: new CryptoRandomSource()
     });
-    await tx.memorizationQuestion.create({
-      data: {
-        userId,
-        cycleId: cycle.id,
-        packageId: pkg.id,
-        orderInPackage: index + 1,
-        primaryPageNumber: source.primaryPageNumber,
-        juzNumber: source.juzNumber,
-        juzBand: source.juzBand,
-        surahId: source.surahId,
-        anchorVerseId: source.anchorVerseId,
-        anchorVerseKey: source.anchorVerseKey,
-        pagePositionBucket: source.pagePositionBucket,
-        fragmentStartWordId: source.fragmentStartWordId,
-        initialWordCount: source.initialWordCount,
-        visibleWordCount: source.visibleWordCount
-      }
+    questionRows.push({
+      userId,
+      cycleId: cycle.id,
+      packageId: pkg.id,
+      orderInPackage: index + 1,
+      primaryPageNumber: source.primaryPageNumber,
+      juzNumber: source.juzNumber,
+      juzBand: source.juzBand,
+      surahId: source.surahId,
+      anchorVerseId: source.anchorVerseId,
+      anchorVerseKey: source.anchorVerseKey,
+      pagePositionBucket: source.pagePositionBucket,
+      fragmentStartWordId: source.fragmentStartWordId,
+      initialWordCount: source.initialWordCount,
+      visibleWordCount: source.visibleWordCount
     });
   }
+  await tx.memorizationQuestion.createMany({ data: questionRows });
 
   await tx.memorizationCycle.update({
     where: { id: cycle.id },
@@ -281,7 +311,41 @@ async function publicQuestionDto(tx: Prisma.TransactionClient | typeof prisma, q
     where: { id: questionId, userId },
     include: { hintEvents: true, assessment: true }
   });
-  const visibleWords = await wordsFromQuestionStart(tx, question.id, question.visibleWordCount);
+  const wordsByVerse = await wordsByVerseIds(tx, [question.anchorVerseId]);
+  return publicQuestionFromRecord(question, wordsByVerse);
+}
+
+async function publicQuestionsFromRecords(
+  tx: Prisma.TransactionClient | typeof prisma,
+  questions: readonly QuestionForPublicDto[]
+) {
+  const wordsByVerse = await wordsByVerseIds(
+    tx,
+    [...new Set(questions.map((question) => question.anchorVerseId))]
+  );
+  return questions.map((question) => publicQuestionFromRecord(question, wordsByVerse));
+}
+
+async function publicQuestionWithEvents(
+  tx: Prisma.TransactionClient,
+  question: QuestionForPublicDto,
+  newEvents: QuestionForPublicDto["hintEvents"]
+) {
+  const wordsByVerse = await wordsByVerseIds(tx, [question.anchorVerseId]);
+  return publicQuestionFromRecord(
+    {
+      ...question,
+      hintEvents: [...question.hintEvents, ...newEvents]
+    },
+    wordsByVerse
+  );
+}
+
+function publicQuestionFromRecord(
+  question: QuestionForPublicDto,
+  wordsByVerse: Map<number, QuranWordRef[]>
+) {
+  const visibleWords = (wordsByVerse.get(question.anchorVerseId) ?? []).slice(0, question.visibleWordCount);
   const hintCounts = {
     JUZ: question.hintEvents.filter((event) => event.type === "JUZ").length,
     SURAH: question.hintEvents.filter((event) => event.type === "SURAH").length,
@@ -307,9 +371,21 @@ async function publicQuestionDto(tx: Prisma.TransactionClient | typeof prisma, q
 async function packageDto(tx: Prisma.TransactionClient | typeof prisma, packageId: string, userId: string) {
   const pkg = await tx.memorizationPackage.findFirstOrThrow({
     where: { id: packageId, userId },
-    include: { cycle: true, questions: { orderBy: { orderInPackage: "asc" } } }
+    include: packageDtoInclude
   });
-  const questions = await Promise.all(pkg.questions.map((question) => publicQuestionDto(tx, question.id, userId)));
+  return packageDtoFromRecord(tx, pkg);
+}
+
+const packageDtoInclude = {
+  cycle: { include: { _count: { select: { questions: true } } } },
+  questions: {
+    orderBy: { orderInPackage: "asc" },
+    include: { hintEvents: true, assessment: true }
+  }
+} satisfies Prisma.MemorizationPackageInclude;
+
+async function packageDtoFromRecord(tx: Prisma.TransactionClient | typeof prisma, pkg: PackageForDto) {
+  const questions = await publicQuestionsFromRecords(tx, pkg.questions);
   return {
     id: pkg.id,
     packageNumber: pkg.packageNumber,
@@ -318,19 +394,76 @@ async function packageDto(tx: Prisma.TransactionClient | typeof prisma, packageI
       id: pkg.cycle.id,
       cycleNumber: pkg.cycle.cycleNumber,
       state: pkg.cycle.state,
-      pagesTested: await tx.memorizationQuestion.count({ where: { cycleId: pkg.cycleId } })
+      pagesTested: pkg.cycle._count.questions
     },
     questions
   };
 }
 
-async function pageWordRefs(tx: Prisma.TransactionClient, pageNumber: number): Promise<QuranWordRef[]> {
-  const words = await tx.quranWord.findMany({
-    where: { pageNumber, charTypeName: "word" },
-    orderBy: { globalOrder: "asc" },
+type QuestionForPublicDto = Prisma.MemorizationQuestionGetPayload<{
+  include: { hintEvents: true; assessment: true };
+}>;
+
+type PackageForDto = Prisma.MemorizationPackageGetPayload<{
+  include: typeof packageDtoInclude;
+}>;
+
+type QuranWordWithVerse = Prisma.QuranWordGetPayload<{ include: { verse: true } }>;
+
+async function wordRefsForPackagePages(
+  tx: Prisma.TransactionClient,
+  pageNumbers: readonly number[]
+): Promise<Map<number, QuranWordRef[]>> {
+  const uniquePageNumbers = [...new Set(pageNumbers)];
+  const pageWords = await tx.quranWord.findMany({
+    where: { pageNumber: { in: uniquePageNumbers }, charTypeName: "word" },
+    orderBy: [{ pageNumber: "asc" }, { globalOrder: "asc" }],
     include: { verse: true }
   });
-  return words.map((word) => ({
+
+  const verseIdsByPage = new Map<number, Set<number>>();
+  for (const word of pageWords) {
+    const verseIds = verseIdsByPage.get(word.pageNumber) ?? new Set<number>();
+    verseIds.add(word.verseId);
+    verseIdsByPage.set(word.pageNumber, verseIds);
+  }
+
+  const allVerseIds = [...new Set(pageWords.map((word) => word.verseId))];
+  const fullVerseWords = await tx.quranWord.findMany({
+    where: { verseId: { in: allVerseIds }, charTypeName: "word" },
+    orderBy: [{ verseId: "asc" }, { position: "asc" }],
+    include: { verse: true }
+  });
+
+  const result = new Map<number, QuranWordRef[]>();
+  for (const pageNumber of uniquePageNumbers) {
+    const verseIds = verseIdsByPage.get(pageNumber) ?? new Set<number>();
+    result.set(
+      pageNumber,
+      fullVerseWords.filter((word) => verseIds.has(word.verseId)).map(toWordRef)
+    );
+  }
+  return result;
+}
+
+async function wordsByVerseIds(tx: Prisma.TransactionClient | typeof prisma, verseIds: readonly number[]) {
+  if (verseIds.length === 0) return new Map<number, QuranWordRef[]>();
+  const words = await tx.quranWord.findMany({
+    where: { verseId: { in: [...new Set(verseIds)] }, charTypeName: "word" },
+    orderBy: [{ verseId: "asc" }, { position: "asc" }],
+    include: { verse: true }
+  });
+  const result = new Map<number, QuranWordRef[]>();
+  for (const word of words) {
+    const list = result.get(word.verseId) ?? [];
+    list.push(toWordRef(word));
+    result.set(word.verseId, list);
+  }
+  return result;
+}
+
+function toWordRef(word: QuranWordWithVerse): QuranWordRef {
+  return {
     id: word.id,
     verseId: word.verseId,
     verseKey: word.verseKey,
@@ -342,24 +475,7 @@ async function pageWordRefs(tx: Prisma.TransactionClient, pageNumber: number): P
     globalOrder: word.globalOrder,
     lineNumber: word.lineNumber,
     textUthmani: word.textUthmani
-  }));
-}
-
-async function wordsFromQuestionStart(
-  tx: Prisma.TransactionClient | typeof prisma,
-  questionId: string,
-  count: number
-) {
-  const question = await tx.memorizationQuestion.findUniqueOrThrow({ where: { id: questionId } });
-  const start = await tx.quranWord.findUniqueOrThrow({ where: { id: question.fragmentStartWordId } });
-  return tx.quranWord.findMany({
-    where: {
-      verseId: question.anchorVerseId,
-      globalOrder: { gte: start.globalOrder }
-    },
-    orderBy: { globalOrder: "asc" },
-    take: count
-  });
+  };
 }
 
 async function completePackageIfReady(tx: Prisma.TransactionClient, packageId: string) {
