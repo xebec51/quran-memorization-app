@@ -223,6 +223,7 @@ model MemorizationQuestion {
   fragmentStartWordId Int
   initialWordCount    Int
   visibleWordCount    Int
+  visibleFragmentText String
   maxExtensionCount   Int                @default(3)
   maxNextVerseCount   Int                @default(3)
   answerRevealedAt    DateTime?
@@ -239,6 +240,8 @@ model MemorizationQuestion {
   @@unique([cycleId, primaryPageNumber])
   @@unique([packageId, orderInPackage])
   @@index([userId, createdAt])
+  @@index([userId, juzBand])
+  @@index([userId, primaryPageNumber])
   @@index([anchorVerseId])
 }
 
@@ -256,6 +259,7 @@ model HintEvent {
 
   @@unique([questionId, type, ordinal])
   @@index([questionId, type])
+  @@index([userId, type])
   @@index([userId, createdAt])
 }
 
@@ -270,4 +274,5 @@ model QuestionAssessment {
   question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
+  @@index([userId, assessment])
 }

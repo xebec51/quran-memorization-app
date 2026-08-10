@@ -34,8 +34,8 @@ npm run dev
 
 Required local environment:
 
-- `DATABASE_URL`
-- `DIRECT_URL`
+- `DATABASE_URL` - runtime database URL. Use the Neon pooled URL in production.
+- `DIRECT_URL` - Prisma migration/admin URL. Use the Neon direct URL in production.
 - `AUTH_SECRET`
 - `APP_URL`
 - `QF_ENV=production`
@@ -85,7 +85,9 @@ See [docs/memorization-engine.md](docs/memorization-engine.md). The key invarian
 
 ## Deployment
 
-Deploy to Vercel with Neon PostgreSQL. Set the environment variables above in Vercel, run Prisma migrations during deployment, then run `npm run quran:sync` from a secure server-side environment. Do not place secrets in workflow YAML or client-exposed variables.
+Deploy to Vercel with Neon PostgreSQL. Set `DATABASE_URL` to the pooled Neon URL for runtime traffic and `DIRECT_URL` to the direct Neon URL for Prisma migrations/admin operations. Run Prisma migrations during deployment, then run `npm run quran:sync` from a secure server-side environment. Do not place secrets in workflow YAML or client-exposed variables.
+
+Check the Vercel function region and Neon database region before production launch. Keep them geographically close to reduce authenticated memorization latency.
 
 ## License
 

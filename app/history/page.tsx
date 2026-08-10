@@ -8,12 +8,35 @@ export const dynamic = "force-dynamic";
 
 export default async function HistoryPage() {
   const user = await getCurrentUser();
-  if (!user) return <Card><p>Masuk untuk melihat riwayat.</p><Link href="/login"><Button className="mt-4">Masuk</Button></Link></Card>;
+  if (!user) {
+    return (
+      <Card>
+        <p>Masuk untuk melihat riwayat.</p>
+        <Link href="/login">
+          <Button className="mt-4">Masuk</Button>
+        </Link>
+      </Card>
+    );
+  }
   const packages = await prisma.memorizationPackage.findMany({
     where: { userId: user.id },
     orderBy: { createdAt: "desc" },
     take: 30,
-    include: { cycle: true, questions: { include: { assessment: true, hintEvents: true }, orderBy: { orderInPackage: "asc" } } }
+    select: {
+      id: true,
+      packageNumber: true,
+      state: true,
+      cycle: { select: { cycleNumber: true } },
+      questions: {
+        orderBy: { orderInPackage: "asc" },
+        select: {
+          id: true,
+          orderInPackage: true,
+          assessment: { select: { assessment: true } },
+          _count: { select: { hintEvents: true } }
+        }
+      }
+    }
   });
   return (
     <div className="grid gap-4 pb-20">
@@ -22,13 +45,24 @@ export default async function HistoryPage() {
       {packages.map((pkg) => (
         <Card key={pkg.id}>
           <div className="flex flex-wrap justify-between gap-2">
-            <h2 className="font-semibold">Siklus {pkg.cycle.cycleNumber} · Paket {pkg.packageNumber}</h2>
-            <span className="text-sm text-[var(--muted)]">{pkg.state === "COMPLETED" ? "Selesai" : "Berjalan"}</span>
+            <h2 className="font-semibold">
+              Siklus {pkg.cycle.cycleNumber} - Paket {pkg.packageNumber}
+            </h2>
+            <span className="text-sm text-[var(--muted)]">
+              {pkg.state === "COMPLETED" ? "Selesai" : "Berjalan"}
+            </span>
           </div>
           <div className="mt-3 grid gap-2 md:grid-cols-4">
             {pkg.questions.map((question) => (
-              <div key={question.id} className="rounded-md bg-slate-50 p-3 text-sm">
-                Soal {question.orderInPackage}: {question.assessment ? assessmentLabel(question.assessment.assessment) : "Belum dinilai"} · {question.hintEvents.length} petunjuk
+              <div
+                key={question.id}
+                className="rounded-md bg-slate-50 p-3 text-sm"
+              >
+                Soal {question.orderInPackage}:{" "}
+                {question.assessment
+                  ? assessmentLabel(question.assessment.assessment)
+                  : "Belum dinilai"}{" "}
+                - {question._count.hintEvents} petunjuk
               </div>
             ))}
           </div>

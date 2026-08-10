@@ -70,3 +70,25 @@ export type PublicQuestion = {
   answerRevealed: boolean;
   assessment: RecallAssessment | null;
 };
+
+export type PublicHint = {
+  type: HintType;
+  ordinal: number;
+  text: string;
+};
+
+export type HintCounts = Record<HintType, number>;
+
+export type HintMutationResult = {
+  questionId: string;
+  hint: PublicHint;
+  availableHints: PublicQuestion["availableHints"];
+  hintCounts: HintCounts;
+  fragmentText?: string;
+};
+
+export type AssessmentMutationResult = {
+  questionId: string;
+  assessment: RecallAssessment;
+  packageCompleted: boolean;
+};

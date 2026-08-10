@@ -43,6 +43,8 @@ The prompt itself always starts at the first word of the selected ayah. It never
 
 Selection is deterministic under an injected seeded RNG in tests and uses secure randomness in production allocation.
 
+The generated visible prompt is stored as `visibleFragmentText` when the question is created. Canonical anchor ids, word counts, and Quran word references are still retained for integrity and for safe `EXTEND_FRAGMENT` continuation.
+
 ## Hints
 
 Hints are independent:

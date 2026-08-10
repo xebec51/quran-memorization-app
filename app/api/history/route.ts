@@ -9,9 +9,23 @@ export async function GET() {
       where: { userId: user.id },
       orderBy: { createdAt: "desc" },
       take: 30,
-      include: {
-        cycle: true,
-        questions: { include: { assessment: true, hintEvents: true }, orderBy: { orderInPackage: "asc" } }
+      select: {
+        id: true,
+        packageNumber: true,
+        state: true,
+        createdAt: true,
+        completedAt: true,
+        cycle: { select: { cycleNumber: true } },
+        questions: {
+          orderBy: { orderInPackage: "asc" },
+          select: {
+            id: true,
+            orderInPackage: true,
+            answerRevealedAt: true,
+            assessment: { select: { assessment: true } },
+            _count: { select: { hintEvents: true } }
+          }
+        }
       }
     });
     return jsonOk(
@@ -26,7 +40,7 @@ export async function GET() {
           id: question.id,
           order: question.orderInPackage,
           answerRevealed: Boolean(question.answerRevealedAt),
-          hints: question.hintEvents.length,
+          hints: question._count.hintEvents,
           assessment: question.assessment?.assessment ?? null
         }))
       }))

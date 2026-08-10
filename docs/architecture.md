@@ -4,7 +4,7 @@ Tasmiq is a Next.js App Router application with a domain-first backend for Musab
 
 ## Runtime Boundaries
 
-Browser code receives only public challenge DTOs: question id, order, visible fragment, hint availability, reveal state, and assessment state. Surah, ayah, page, juz, anchor verse, ayah-start source metadata, and answer continuation remain in PostgreSQL until a user explicitly requests the corresponding hint or answer reveal.
+Browser code receives only public challenge DTOs: question id, order, visible fragment, hint availability, reveal state, and assessment state. Surah, ayah, page, juz, anchor verse, ayah-start source metadata, and answer continuation remain in PostgreSQL until a user explicitly requests the corresponding hint or answer reveal. The visible prompt text is persisted separately from the canonical anchor references so ordinary question rendering does not need to reconstruct Quran words.
 
 Quran Foundation credentials are read only by server-side scripts/provider code through `QF_CLIENT_ID`, `QF_CLIENT_SECRET`, and `QF_ENV`.
 
@@ -23,6 +23,10 @@ Quran Foundation credentials are read only by server-side scripts/provider code 
 
 Prisma models normalize users, sessions, Quran chapters/pages/verses/words, cycles, packages, questions, hint events, and assessments. Database constraints enforce unique package numbers and `UNIQUE(cycleId, primaryPageNumber)` so a primary page cannot repeat within a cycle.
 
+Hot memorization mutations return minimal DTOs. Assessment returns only the changed question id, selected assessment, and package completion state; hints return the new hint plus changed availability state, with fragment text included only for `EXTEND_FRAGMENT`.
+
+API routes expose safe `Server-Timing` entries for session lookup and memorization hot paths. These timings contain durations only and never include credentials, connection strings, Quran Foundation secrets, or hidden answer metadata.
+
 ## Deployment
 
-The app is Vercel-ready and Neon-compatible. Use pooled URLs for ordinary runtime traffic and `DIRECT_URL` for direct database access when available.
+The app is Vercel-ready and Neon-compatible. Use the pooled Neon URL in `DATABASE_URL` for ordinary runtime traffic and the direct Neon URL in `DIRECT_URL` for Prisma migrations/admin access. Keep the Vercel function region and Neon database region geographically close.

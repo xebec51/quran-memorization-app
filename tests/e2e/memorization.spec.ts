@@ -97,6 +97,7 @@ test("critical memorization flow", async ({
   await expect(
     page.getByRole("heading", { name: "Riwayat Latihan" })
   ).toBeVisible();
+  await expect(page.getByText("Selesai")).toBeVisible();
 
   await page.goto("/reader");
   await expect(page.getByRole("heading", { name: "Mushaf" })).toBeVisible();
