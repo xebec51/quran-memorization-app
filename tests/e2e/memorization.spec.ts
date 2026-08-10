@@ -1,11 +1,19 @@
 import { expect, test } from "@playwright/test";
 
-test("critical memorization flow", async ({ page, request, context }, testInfo) => {
+test("critical memorization flow", async ({
+  page,
+  request,
+  context
+}, testInfo) => {
   const email = `e2e-${testInfo.project.name}-${Date.now()}@example.com`;
   const password = "e2e-password-123";
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Tasmiq — Latihan Musabaqah Hifzhil Qur'an" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Tasmiq — Latihan Musabaqah Hifzhil Qur'an"
+    })
+  ).toBeVisible();
 
   await page.goto("/register");
   await expect(page.getByRole("heading", { name: "Buat Akun" })).toBeVisible();
@@ -33,11 +41,24 @@ test("critical memorization flow", async ({ page, request, context }, testInfo) 
   ]);
 
   await page.goto("/memorization");
-  await page.getByRole("button", { name: "Mulai latihan" }).click({ timeout: 30_000 });
+  await page
+    .getByRole("button", { name: "Mulai latihan" })
+    .click({ timeout: 30_000 });
 
   await expect(page.getByText(/Paket 1/)).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByLabel("Pertanyaan").getByRole("button")).toHaveCount(4);
-  await expect(page.getByRole("button", { name: "Soal selesai dijawab" })).toBeVisible();
+  await expect(page.getByLabel("Pertanyaan").getByRole("button")).toHaveCount(
+    4
+  );
+  await expect(
+    page.getByRole("button", { name: "Soal selesai dijawab" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
+  await page.getByRole("button", { name: "Benar", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Latihan Expert" })
+  ).toBeVisible();
 
   await page.getByRole("button", { name: "Juz" }).click();
   await expect(page.getByText(/Petunjuk Juz/)).toBeVisible();
@@ -54,13 +75,28 @@ test("critical memorization flow", async ({ page, request, context }, testInfo) 
   await page.getByRole("button", { name: "Lihat Jawaban" }).click();
   await expect(page.getByText(/Halaman/)).toBeVisible();
   await page.getByRole("button", { name: "Sebagian benar" }).click();
-  await expect(page.getByRole("heading", { name: "Latihan Expert" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Latihan Expert" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
+  await page.getByRole("button", { name: "Benar", exact: true }).click();
+
+  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
+  await page.getByRole("button", { name: "Belum ingat" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Paket selesai" })
+  ).toBeVisible();
 
   await page.goto("/analytics");
   await expect(page.getByRole("heading", { name: "Analitik" })).toBeVisible();
 
   await page.goto("/history");
-  await expect(page.getByRole("heading", { name: "Riwayat Latihan" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Riwayat Latihan" })
+  ).toBeVisible();
 
   await page.goto("/reader");
   await expect(page.getByRole("heading", { name: "Mushaf" })).toBeVisible();
