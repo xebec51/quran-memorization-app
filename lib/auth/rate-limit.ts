@@ -3,7 +3,13 @@ import { prisma } from "@/lib/db/prisma";
 
 const WINDOW_MS = 10 * 60 * 1000;
 export const LOGIN_MAX_ATTEMPTS = 10;
-export const REGISTER_MAX_ATTEMPTS = 30;
+// Registration has no per-account target to protect (unlike login, where
+// each attempt targets one email) - this is purely an anti-spam-signup
+// throttle per IP, so it can afford to be generous. Sized with headroom
+// above the e2e suite's real registration volume (~12 per project run,
+// several projects/reruns can land in the same 10-minute window) rather
+// than the tighter number that would suffice for a single run alone.
+export const REGISTER_MAX_ATTEMPTS = 100;
 
 export class RateLimitedError extends Error {
   retryAfterSeconds: number;

@@ -22,12 +22,13 @@ test("public package DTO omits hidden answer metadata and allocation is POST-onl
   const question = body.data.questions[0];
 
   expect(Object.keys(question).sort()).toEqual([
-    "answerRevealed",
     "assessment",
     "availableHints",
     "fragmentText",
+    "hints",
     "id",
     "order",
+    "reveal",
     "totalQuestions"
   ]);
   expect(question).not.toHaveProperty("page");
@@ -35,6 +36,26 @@ test("public package DTO omits hidden answer metadata and allocation is POST-onl
   expect(question).not.toHaveProperty("surah");
   expect(question).not.toHaveProperty("anchorVerseId");
   expect(question).not.toHaveProperty("anchorVerseKey");
+
+  // reveal carries only counts/verses actually opened so far - never the
+  // unopened answer text (docs/memorization-engine.md "Hidden Metadata
+  // Rule"). A freshly allocated question has revealed nothing yet.
+  const reveal = question.reveal as {
+    revealedAyahCount: number;
+    totalAyahCount: number;
+    isComplete: boolean;
+    verses: unknown[];
+  };
+  expect(Object.keys(reveal).sort()).toEqual([
+    "isComplete",
+    "revealedAyahCount",
+    "totalAyahCount",
+    "verses"
+  ]);
+  expect(reveal.revealedAyahCount).toBe(0);
+  expect(reveal.isComplete).toBe(false);
+  expect(reveal.verses).toEqual([]);
+  expect(reveal.totalAyahCount).toBeGreaterThan(0);
 });
 
 test("hint and assessment mutation responses stay minimal and idempotent", async ({

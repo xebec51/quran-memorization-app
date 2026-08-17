@@ -69,11 +69,26 @@ test("critical memorization flow", async ({
   await page.getByRole("button", { name: "Tambah" }).click();
   await expect(page.getByText(/Fragmen/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Ayat" }).click();
+  await page.getByRole("button", { name: "Ayat", exact: true }).click();
   await expect(page.getByText(/Ayat berikutnya/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Lihat Jawaban" }).click();
-  await expect(page.getByText(/Halaman/)).toBeVisible();
+  // Progressive reveal: first click shows exactly ayah 1, staying visible
+  // as later clicks accumulate more, per docs/memorization-engine.md
+  // "Progressive Reveal".
+  await page.getByRole("button", { name: "Lihat Ayat Pertama" }).click();
+  await expect(page.getByText(/Ayat 1\/\d+ terbuka/)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Lihat Ayat Berikutnya" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Lihat Ayat Berikutnya" }).click();
+  await expect(page.getByText(/Ayat 2\/\d+ terbuka/)).toBeVisible();
+
+  // Reveal is only partial here, so the assessment panel isn't shown
+  // automatically yet - the independent "sudah cukup, nilai sekarang" path
+  // opens it explicitly.
+  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await page.getByRole("button", { name: "Sebagian benar" }).click();
   await expect(
     page.getByRole("heading", { name: "Latihan Expert" })
@@ -89,6 +104,26 @@ test("critical memorization flow", async ({
   await expect(
     page.getByRole("heading", { name: "Paket selesai" })
   ).toBeVisible();
+
+  // The assessment button triggers a fire-and-forget keepalive fetch (the
+  // UI updates optimistically before the server confirms), so navigating
+  // to /evaluation right after seeing "Paket selesai" can race the actual
+  // write landing. Poll the API directly (shares the session cookie with
+  // the page via context.addCookies above) until it does, instead of
+  // trusting client-side network-event timing.
+  await expect(async () => {
+    const bank = await request.get("/api/evaluation/bank");
+    const body = (await bank.json()) as { data: { questionId: string }[] };
+    expect(body.data).toHaveLength(2);
+  }).toPass({ timeout: 15_000 });
+
+  await page.goto("/evaluation");
+  await expect(
+    page.getByRole("heading", { name: "Latihan Evaluasi" })
+  ).toBeVisible();
+  // Both the PARTIAL and the MISSED question from this run belong in the
+  // evaluation bank.
+  await expect(page.getByText("Bank Evaluasi (2)")).toBeVisible();
 
   await page.goto("/analytics");
   await expect(page.getByRole("heading", { name: "Analitik" })).toBeVisible();
