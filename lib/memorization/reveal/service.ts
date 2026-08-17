@@ -36,16 +36,19 @@ export async function computeRevealBoundary(
     );
   }
 
-  const [anchor, boundary] = await Promise.all([
-    tx.quranVerse.findUniqueOrThrow({
-      where: { id: anchorVerseId },
-      select: { globalOrder: true }
-    }),
-    tx.quranVerse.findUniqueOrThrow({
-      where: { id: lastWordOnPage.verseId },
-      select: { globalOrder: true }
-    })
-  ]);
+  // Sequential, not Promise.all: Prisma's interactive-transaction client
+  // (`tx`) is bound to a single reserved connection and does not support
+  // concurrent queries issued against it - see the reveal/allocation
+  // concurrency fix in this file's history for the P2028 failures that
+  // caused.
+  const anchor = await tx.quranVerse.findUniqueOrThrow({
+    where: { id: anchorVerseId },
+    select: { globalOrder: true }
+  });
+  const boundary = await tx.quranVerse.findUniqueOrThrow({
+    where: { id: lastWordOnPage.verseId },
+    select: { globalOrder: true }
+  });
 
   if (boundary.globalOrder < anchor.globalOrder) {
     throw new Error(
@@ -53,11 +56,11 @@ export async function computeRevealBoundary(
     );
   }
 
-  const totalAyahCount = await tx.quranVerse.count({
-    where: {
-      globalOrder: { gte: anchor.globalOrder, lte: boundary.globalOrder }
-    }
-  });
+  // QuranVerse.globalOrder is a contiguous, gapless sequence assigned as
+  // index+1 over canonically-sorted verses (see lib/quran/sync/sync.ts) -
+  // the verse count between two globalOrder values is therefore pure
+  // arithmetic, not a query.
+  const totalAyahCount = boundary.globalOrder - anchor.globalOrder + 1;
 
   return { boundaryVerseId: lastWordOnPage.verseId, totalAyahCount };
 }

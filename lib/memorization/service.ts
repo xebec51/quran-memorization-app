@@ -457,15 +457,16 @@ async function allocatePackage(
       });
     });
 
-    const boundaries = await Promise.all(
-      sources.map((source) =>
-        computeRevealBoundary(
-          tx,
-          source.anchorVerseId,
-          source.primaryPageNumber
-        )
-      )
-    );
+    // Sequential, not Promise.all: `tx` is a single interactive-transaction
+    // client bound to one reserved connection, and Prisma does not support
+    // concurrent queries against it (risks P2028 "transaction already
+    // closed" under load) - see the matching fix in reveal/service.ts.
+    const boundaries: Awaited<ReturnType<typeof computeRevealBoundary>>[] = [];
+    for (const source of sources) {
+      boundaries.push(
+        await computeRevealBoundary(tx, source.anchorVerseId, source.primaryPageNumber)
+      );
+    }
 
     const questionRows: GeneratedQuestionRow[] = sources.map(
       (source, index) => ({
