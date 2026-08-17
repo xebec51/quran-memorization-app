@@ -75,6 +75,10 @@ export function EvaluationApp({
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
+  // One key per selected question, reused across retries of the same
+  // submission (double-click, dropped response) so the server can dedupe -
+  // see submitEvaluationAttempt. A fresh key is only drawn on selection.
+  const attemptKeyRef = useRef<string>(crypto.randomUUID());
 
   const selected = bank.find((item) => item.questionId === selectedId) ?? null;
 
@@ -83,6 +87,7 @@ export function EvaluationApp({
     setBelCount("0");
     setTuntunCount("0");
     setError(null);
+    attemptKeyRef.current = crypto.randomUUID();
   }
 
   async function submitAttempt(result: Assessment) {
@@ -105,21 +110,28 @@ export function EvaluationApp({
         questionId: selected.questionId,
         result,
         belCount: parsedBel,
-        tuntunCount: parsedTuntun
+        tuntunCount: parsedTuntun,
+        clientRequestId: attemptKeyRef.current
       });
-      setHistory((current) => ({
-        items: [attempt, ...current.items],
-        nextCursor: current.nextCursor
-      }));
-      setSummary((current) => ({
-        totalAttempts: current.totalAttempts + 1,
-        totalBelCount: current.totalBelCount + attempt.belCount,
-        totalTuntunCount: current.totalTuntunCount + attempt.tuntunCount,
-        resultCounts: {
-          ...current.resultCounts,
-          [attempt.result]: current.resultCounts[attempt.result] + 1
-        }
-      }));
+      // A deduped retry (server returned the attempt already created by an
+      // earlier try with the same clientRequestId) must not be counted or
+      // listed twice on the client either.
+      const alreadyRecorded = history.items.some((item) => item.id === attempt.id);
+      if (!alreadyRecorded) {
+        setHistory((current) => ({
+          items: [attempt, ...current.items],
+          nextCursor: current.nextCursor
+        }));
+        setSummary((current) => ({
+          totalAttempts: current.totalAttempts + 1,
+          totalBelCount: current.totalBelCount + attempt.belCount,
+          totalTuntunCount: current.totalTuntunCount + attempt.tuntunCount,
+          resultCounts: {
+            ...current.resultCounts,
+            [attempt.result]: current.resultCounts[attempt.result] + 1
+          }
+        }));
+      }
       setSelectedId(null);
       setBelCount("0");
       setTuntunCount("0");

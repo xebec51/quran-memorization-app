@@ -110,19 +110,37 @@ test("belCount and tuntunCount must be non-negative integers", async ({
 
   const negative = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
-    data: { questionId, result: "MISSED", belCount: -1, tuntunCount: 0 }
+    data: {
+      questionId,
+      result: "MISSED",
+      belCount: -1,
+      tuntunCount: 0,
+      clientRequestId: "validate-negative"
+    }
   });
   expect(negative.status()).toBe(422);
 
   const nonInteger = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
-    data: { questionId, result: "MISSED", belCount: 1.5, tuntunCount: 0 }
+    data: {
+      questionId,
+      result: "MISSED",
+      belCount: 1.5,
+      tuntunCount: 0,
+      clientRequestId: "validate-non-integer"
+    }
   });
   expect(nonInteger.status()).toBe(422);
 
   const zeroIsValid = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
-    data: { questionId, result: "CORRECT", belCount: 0, tuntunCount: 0 }
+    data: {
+      questionId,
+      result: "CORRECT",
+      belCount: 0,
+      tuntunCount: 0,
+      clientRequestId: "validate-zero"
+    }
   });
   expect(zeroIsValid.ok()).toBe(true);
 
@@ -132,10 +150,58 @@ test("belCount and tuntunCount must be non-negative integers", async ({
       questionId: "not-a-real-question-id",
       result: "CORRECT",
       belCount: 0,
-      tuntunCount: 0
+      tuntunCount: 0,
+      clientRequestId: "validate-unknown-question"
     }
   });
   expect(unknownQuestion.status()).toBe(404);
+});
+
+test("a duplicate submission (same clientRequestId) is deduped, not double-counted", async ({
+  request
+}, testInfo) => {
+  const { cookie, questionIds } = await setupAssessedQuestions(
+    request,
+    `${testInfo.project.name}-dedupe`
+  );
+  const questionId = questionIds.missed[0];
+  const clientRequestId = "dup-key-fixed";
+
+  const first = await submitAttempt(
+    request,
+    cookie,
+    questionId,
+    "PARTIAL",
+    3,
+    2,
+    clientRequestId
+  );
+  // Same key again - simulates a double-click or a client retry after a
+  // dropped response for the same logical submission.
+  const second = await submitAttempt(
+    request,
+    cookie,
+    questionId,
+    "PARTIAL",
+    3,
+    2,
+    clientRequestId
+  );
+  expect(second.id).toBe(first.id);
+
+  const historyResponse = await request.get(
+    "/api/evaluation/history?limit=20",
+    { headers: { cookie } }
+  );
+  const history = (await historyResponse.json()).data as {
+    items: { id: string; questionId: string }[];
+    summary: { totalAttempts: number; totalBelCount: number };
+  };
+  expect(
+    history.items.filter((item) => item.questionId === questionId)
+  ).toHaveLength(1);
+  expect(history.summary.totalAttempts).toBe(1);
+  expect(history.summary.totalBelCount).toBe(3);
 });
 
 async function submitAttempt(
@@ -144,11 +210,12 @@ async function submitAttempt(
   questionId: string,
   result: "CORRECT" | "PARTIAL" | "MISSED",
   belCount: number,
-  tuntunCount: number
+  tuntunCount: number,
+  clientRequestId = `${questionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 ) {
   const response = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
-    data: { questionId, result, belCount, tuntunCount }
+    data: { questionId, result, belCount, tuntunCount, clientRequestId }
   });
   expect(response.ok()).toBe(true);
   return (await response.json()).data as { id: string };

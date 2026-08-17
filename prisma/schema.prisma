@@ -301,13 +301,20 @@ model QuestionAssessment {
 }
 
 model EvaluationAttempt {
-  id          String           @id @default(cuid())
-  userId      String
-  questionId  String
-  result      RecallAssessment
-  belCount    Int
-  tuntunCount Int
-  createdAt   DateTime         @default(now())
+  id              String           @id @default(cuid())
+  userId          String
+  questionId      String
+  result          RecallAssessment
+  belCount        Int
+  tuntunCount     Int
+  // Client-generated per-submission key. A double-click or network retry
+  // of the same submission reuses this key, which lets submitEvaluationAttempt
+  // recognize the duplicate via the unique constraint below and return the
+  // already-created attempt instead of creating a second row. Nullable so
+  // it stays additive against rows written before this column existed;
+  // Postgres allows any number of NULLs in a unique index.
+  clientRequestId String?          @unique
+  createdAt       DateTime         @default(now())
 
   user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)

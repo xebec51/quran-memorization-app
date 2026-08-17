@@ -64,12 +64,29 @@ export async function getEvaluationBank(
   });
 }
 
+const evaluationAttemptDtoSelect = {
+  id: true,
+  questionId: true,
+  result: true,
+  belCount: true,
+  tuntunCount: true,
+  createdAt: true
+} satisfies Prisma.EvaluationAttemptSelect;
+
+/**
+ * clientRequestId is a per-submission key the client generates once and
+ * resends unchanged on any retry of the same submission (double-click,
+ * dropped response, etc). A duplicate is recognized via the unique
+ * constraint on the column and returns the attempt already created
+ * instead of creating a second row or erroring - see prisma/schema.prisma.
+ */
 export async function submitEvaluationAttempt(
   userId: string,
   questionId: string,
   result: RecallAssessment,
   belCount: number,
-  tuntunCount: number
+  tuntunCount: number,
+  clientRequestId: string
 ): Promise<EvaluationAttemptDto> {
   return measureServerTiming("evaluation_attempt_submit", async () => {
     const question = await prisma.memorizationQuestion.findFirst({
@@ -78,18 +95,27 @@ export async function submitEvaluationAttempt(
     });
     if (!question) throw notFoundError();
 
-    const attempt = await prisma.evaluationAttempt.create({
-      data: { userId, questionId, result, belCount, tuntunCount },
-      select: {
-        id: true,
-        questionId: true,
-        result: true,
-        belCount: true,
-        tuntunCount: true,
-        createdAt: true
+    try {
+      const attempt = await prisma.evaluationAttempt.create({
+        data: { userId, questionId, result, belCount, tuntunCount, clientRequestId },
+        select: evaluationAttemptDtoSelect
+      });
+      return { ...attempt, createdAt: attempt.createdAt.toISOString() };
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const existing = await prisma.evaluationAttempt.findUnique({
+          where: { clientRequestId },
+          select: evaluationAttemptDtoSelect
+        });
+        if (existing) {
+          return { ...existing, createdAt: existing.createdAt.toISOString() };
+        }
       }
-    });
-    return { ...attempt, createdAt: attempt.createdAt.toISOString() };
+      throw error;
+    }
   });
 }
 
