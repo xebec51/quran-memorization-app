@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
 import { notFoundError } from "../errors";
 import type {
@@ -124,29 +125,24 @@ export async function getEvaluationHistory(
   cursor: string | null,
   limit: number
 ) {
-  return measureServerTiming("evaluation_history", async () => {
-    const attempts = await prisma.evaluationAttempt.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      select: {
-        id: true,
-        questionId: true,
-        result: true,
-        belCount: true,
-        tuntunCount: true,
-        createdAt: true
-      }
-    });
-    const hasMore = attempts.length > limit;
-    const page = hasMore ? attempts.slice(0, limit) : attempts;
-    const items: EvaluationAttemptDto[] = page.map((attempt) => ({
-      ...attempt,
-      createdAt: attempt.createdAt.toISOString()
-    }));
-    return { items, nextCursor: hasMore ? page[page.length - 1].id : null };
-  });
+  return measureServerTiming("evaluation_history", () =>
+    paginateByCursor(
+      (args) =>
+        prisma.evaluationAttempt.findMany({
+          where: { userId },
+          orderBy: { createdAt: "desc" },
+          select: evaluationAttemptDtoSelect,
+          ...args
+        }),
+      cursor,
+      limit,
+      (attempt): EvaluationAttemptDto => ({
+        ...attempt,
+        createdAt: attempt.createdAt.toISOString()
+      }),
+      (attempt) => attempt.id
+    )
+  );
 }
 
 export async function getEvaluationSummary(

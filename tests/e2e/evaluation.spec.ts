@@ -165,7 +165,13 @@ test("a duplicate submission (same clientRequestId) is deduped, not double-count
     `${testInfo.project.name}-dedupe`
   );
   const questionId = questionIds.missed[0];
-  const clientRequestId = "dup-key-fixed";
+  // Must be unique per test run, not just per call within this test: this
+  // suite runs against a persistent (not reset-per-run) dev database, and
+  // a literal fixed string would collide with a row left over from a
+  // previous run of this exact test, silently deduping against stale data
+  // for the wrong question instead of exercising the same-run duplicate
+  // path this test means to check.
+  const clientRequestId = `dup-key-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const first = await submitAttempt(
     request,
