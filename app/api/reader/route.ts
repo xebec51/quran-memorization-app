@@ -12,31 +12,45 @@ const schema = z.object({
   value: z.coerce.number().int().positive().default(1)
 });
 
+const readerVerseSelect = {
+  verseKey: true,
+  textUthmani: true,
+  verseNumber: true,
+  juzNumber: true,
+  pageNumber: true,
+  globalOrder: true,
+  chapter: {
+    select: {
+      nameTransliterated: true,
+      nameArabic: true
+    }
+  }
+} as const;
+
+async function versesForPage(pageNumber: number) {
+  const words = await prisma.quranWord.findMany({
+    where: { pageNumber, charTypeName: "word" },
+    select: { verseId: true },
+    distinct: ["verseId"]
+  });
+  const verseIds = words.map((word) => word.verseId);
+  return prisma.quranVerse.findMany({
+    where: { id: { in: verseIds } },
+    orderBy: { globalOrder: "asc" },
+    select: readerVerseSelect
+  });
+}
+
 const getCachedReaderData = unstable_cache(
   async (mode: "page" | "surah" | "juz", value: number) => {
-    const where =
+    const verses =
       mode === "page"
-        ? { pageNumber: value }
-        : mode === "surah"
-          ? { chapterId: value }
-          : { juzNumber: value };
-    const verses = await prisma.quranVerse.findMany({
-      where,
-      orderBy: { globalOrder: "asc" },
-      select: {
-        verseKey: true,
-        textUthmani: true,
-        verseNumber: true,
-        juzNumber: true,
-        pageNumber: true,
-        chapter: {
-          select: {
-            nameTransliterated: true,
-            nameArabic: true
-          }
-        }
-      }
-    });
+        ? await versesForPage(value)
+        : await prisma.quranVerse.findMany({
+            where: mode === "surah" ? { chapterId: value } : { juzNumber: value },
+            orderBy: { globalOrder: "asc" },
+            select: readerVerseSelect
+          });
     return {
       mode,
       value,
@@ -51,7 +65,7 @@ const getCachedReaderData = unstable_cache(
       }))
     };
   },
-  ["quran-reader"],
+  ["quran-reader-v2"],
   { revalidate: 86_400, tags: ["quran-reader"] }
 );
 
