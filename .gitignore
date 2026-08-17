@@ -154,3 +154,6 @@ test-results/
 generated/
 
 /generated/prisma
+
+# Local-only migration safety snapshots (real user data) - never committed
+/.migration-safety/*.json

@@ -65,6 +65,7 @@ jobs:
       - run: npm run quran:load-fixture
       - run: npm run quran:validate
       - run: npm run quran:validate-anchors
+      - run: npm run test:integration
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()
