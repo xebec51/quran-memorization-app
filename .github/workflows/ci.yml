@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
-      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci
       AUTH_SECRET: ci-secret-value-at-least-32-bytes-long
       APP_URL: http://localhost:3000
       QF_ENV: production
@@ -22,7 +21,54 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
+      - run: npm run format
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      AUTH_SECRET: ci-secret-value-at-least-32-bytes-long
+      APP_URL: http://127.0.0.1:3210
+      E2E_BASE_URL: ""
+      QF_ENV: production
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run db:generate
+      - run: npm run db:deploy
+      # Isolated, ephemeral database for this job only - loaded from a
+      # committed real (QF-API-sourced) snapshot, never a live QF API call
+      # or the shared personal Neon database. See scripts/export-quran-fixture.ts.
+      - run: npm run quran:load-fixture
+      - run: npm run quran:validate
+      - run: npm run quran:validate-anchors
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

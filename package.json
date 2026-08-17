@@ -18,6 +18,8 @@
     "quran:sync": "tsx scripts/sync-quran.ts",
     "quran:validate": "tsx scripts/validate-quran-data.ts",
     "quran:validate-anchors": "tsx scripts/validate-question-anchors.ts",
+    "quran:export-fixture": "tsx scripts/export-quran-fixture.ts",
+    "quran:load-fixture": "tsx scripts/load-quran-fixture.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
