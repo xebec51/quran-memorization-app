@@ -9,6 +9,7 @@ import { CryptoRandomSource, SeededRandomSource } from "./random";
 import { generateQuestionSource, nextBucket } from "./question/generator";
 import { computeRevealBoundary } from "./reveal/service";
 import { alreadyAssessedError, hintLimitError, notFoundError } from "./errors";
+import { retrySerialization } from "./persistence-retry";
 import type {
   AssessmentMutationResult,
   CyclePlan,
@@ -760,37 +761,6 @@ async function completePackageIfReady(
   }
 
   return true;
-}
-
-async function retrySerialization<T>(
-  fn: () => Promise<T>,
-  attempts = 8
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await fn();
-    } catch (error) {
-      lastError = error;
-      if (!isRetryablePersistenceConflict(error)) break;
-      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
-    }
-  }
-  throw lastError;
-}
-
-function isRetryablePersistenceConflict(error: unknown) {
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return ["P2002", "P2034"].includes(error.code);
-  }
-  if (error && typeof error === "object") {
-    const maybe = error as { cause?: { originalCode?: string }; name?: string };
-    return (
-      maybe.cause?.originalCode === "40001" ||
-      maybe.name === "DriverAdapterError"
-    );
-  }
-  return false;
 }
 
 type QuestionForPublicDto = Prisma.MemorizationQuestionGetPayload<{
