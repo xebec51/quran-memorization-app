@@ -5,6 +5,7 @@ export default defineConfig({
     environment: "node",
     globals: false,
     include: ["tests/integration/**/*.test.ts"],
+    setupFiles: ["./tests/integration/setup-env.ts"],
     // Migration + concurrency tests hit a real Postgres and seed/verify
     // meaningful row counts - slower than the pure-function unit suite.
     testTimeout: 30_000,

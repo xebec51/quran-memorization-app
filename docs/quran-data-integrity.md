@@ -15,8 +15,61 @@ The command requires server-side `QF_CLIENT_ID`, `QF_CLIENT_SECRET`, and `QF_ENV
 - 114 chapters;
 - 604 pages;
 - 6,236 verses;
+- 77,430 words;
 - Uthmani text;
 - word order, page, line, verse, and juz metadata where available.
+
+The entire provider payload is fetched and structurally pre-validated in
+memory (`preflightValidate` in `lib/quran/sync/sync.ts`) before a single
+row is written. Persistence is upsert-only (`INSERT ... ON CONFLICT DO
+UPDATE`) inside one transaction - existing rows are never deleted, so a
+mid-sync failure or a sync that runs while users already have progress
+can never leave the app without Quran data.
+
+`QuranVerse.globalOrder` and `QuranWord.globalOrder` are reassigned on
+every sync from canonical `(chapter, verse, position)` order (not from
+provider-supplied ids, which are not monotonic across surah boundaries).
+Reassigning ~77,000 rows' `globalOrder` in one transaction can transiently
+collide mid-batch even though the final state is unique - the old
+approach handled this by `DROP INDEX`-ing the unique constraint for the
+transaction's duration, which held an `ACCESS EXCLUSIVE` lock on the
+table for the whole sync (potentially minutes), blocking every concurrent
+read (reveal, question generation, reader page). The constraint is now
+`DEFERRABLE INITIALLY DEFERRED` (see migration
+`20260818090000_make_global_order_constraints_deferrable`) - Postgres
+only checks uniqueness at `COMMIT`, so the same collision-tolerance is
+preserved (a genuine final-state duplicate still fails the whole
+transaction) without ever dropping the index, so concurrent reads are
+never blocked.
+
+Full validation (`validateQuranData`) runs _inside_ the same transaction
+as the upserts, immediately before commit: if it fails, the transaction
+rolls back in full, so a validation failure can never leave the live
+tables half-updated.
+
+Rows present in the database but absent from the current sync payload
+(`findStaleRows`) are checked for _before_ any upsert runs, and the whole
+sync refuses to proceed if it finds any - never deleting them, but also
+never silently continuing. This isn't just conservative for its own
+sake: `QuranVerse.globalOrder`/`QuranWord.globalOrder` are recomputed
+every sync as a dense, gapless `1..N` sequence over the current payload,
+but a stale row left in place keeps whatever `globalOrder` value its
+last real sync assigned - the two are structurally incompatible, so
+letting the sync proceed would very often still fail downstream anyway
+(via the exact-count or gapless check), just later and with a confusing
+generic error instead of an immediate, actionable one naming the
+specific stale ids. A refusal here means a human needs to manually
+resolve the conflict (confirm whether the provider gap is a transient
+glitch worth retrying, or a genuine upstream change requiring the
+specific stale row to be resolved directly) before the next sync
+attempt - sync itself will never guess and will never auto-delete Quran
+data to make the numbers line up.
+
+Note the id-list comparison in `findStaleRows` uses raw SQL with a single
+array parameter (`= ANY($1::int[])`), not Prisma's `notIn: [...ids]`: at
+the real word-table scale (77,430 ids), `notIn` would compile to one bind
+parameter per id, exceeding Postgres's 65,535-parameter-per-message
+limit.
 
 ## Validation
 
@@ -26,7 +79,39 @@ Run:
 npm run quran:validate
 ```
 
-Validation checks chapter/page/verse/word counts, verse-key uniqueness, juz and page ranges, and whether a full memorization cycle can be constructed from imported page bands.
+Validation checks chapter/page/verse/word counts against the exact
+canonical totals (114/604/6236/77430), verse-key uniqueness, juz and page
+ranges, that `QuranVerse.globalOrder`/`QuranWord.globalOrder` are each
+unique _and_ gapless/contiguous (`1..N`, not just distinct), that every
+word references a real verse, and whether a full memorization cycle can
+be constructed from imported page bands. This same check also gates the
+sync transaction's own commit (see above), so a bad sync payload is
+rejected before it ever becomes live data, not just flagged after the
+fact by a separate manual step.
+
+## Question Anchor Validation
+
+Run:
+
+```bash
+npm run quran:validate-anchors        # informational only
+npm run quran:validate-anchors -- --strict   # non-zero exit on any violation
+```
+
+Checks that every `MemorizationQuestion.fragmentStartWordId` is genuinely
+the first word of its verse (the "prompt always starts at an ayah
+beginning" invariant - see [Memorization Engine](memorization-engine.md)).
+Referential existence and per-cycle anchor uniqueness are already
+enforced by database constraints and can never be violated by new writes;
+this checks the one invariant those constraints can't express. Without
+`--strict` this only prints findings and always exits 0, because the real
+dev database has a small number of historical rows (created before this
+rule was enforced) that are intentionally left as-is rather than
+rewritten, since real users already answered them. CI runs this with
+`--strict`, and deliberately _after_ `test:e2e` rather than right after
+loading the fixture - checking it earlier would run against a database
+with zero `MemorizationQuestion` rows and could never catch a real
+regression.
 
 ## Browser Translation
 

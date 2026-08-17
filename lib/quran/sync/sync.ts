@@ -4,6 +4,11 @@ import type { QuranProvider } from "../provider/types";
 import { classifyPageBand } from "../validation/page-band";
 import { validateQuranData } from "../validation/validate";
 
+type StaleRowReport = {
+  staleVerseIds: number[];
+  staleWordIds: number[];
+};
+
 type ChapterRow = {
   id: number;
   nameArabic: string;
@@ -183,44 +188,84 @@ export async function syncQuranData(provider: QuranProvider) {
       );
     }
 
-    await prisma.$transaction(
+    const validation = await prisma.$transaction(
       async (tx) => {
+        // globalOrder's uniqueness is DEFERRABLE INITIALLY DEFERRED (see
+        // migration 20260818090000_make_global_order_constraints_deferrable)
+        // so Postgres only checks it at commit, not after every row - the
+        // bulk reorder below can transiently "collide" mid-batch (row A
+        // takes the globalOrder value row B is about to vacate) without
+        // error, and if the FINAL state is somehow not unique, COMMIT
+        // itself fails and the whole transaction rolls back, so this still
+        // cannot mask a genuine data problem. Explicit SET CONSTRAINTS is
+        // redundant with INITIALLY DEFERRED but kept for clarity: this
+        // sync depends on deferred checking, not just on whatever the
+        // constraint's default happens to be.
+        await tx.$executeRaw`SET CONSTRAINTS "QuranVerse_globalOrder_key", "QuranWord_globalOrder_key" DEFERRED`;
+
+        // Checked BEFORE any upsert, not after: globalOrder is recomputed
+        // every sync as a dense, gapless 1..N sequence over the CURRENT
+        // payload (see verseRows/wordRows above), but a stale row left
+        // behind by a past sync keeps whatever globalOrder value it was
+        // last assigned - so a lingering stale row and a freshly
+        // renumbered dense set are structurally incompatible, not just
+        // cosmetically mismatched. Proceeding into the upsert anyway would
+        // very often *still* fail (found empirically: validateQuranData's
+        // exact-count or gapless check rejects it downstream in most
+        // cases, since almost any removed id shifts everything after it),
+        // just later and with a confusing generic error instead of a
+        // clear, immediate, actionable one. Refusing here also means sync
+        // never has to choose between violating "never auto-delete Quran
+        // data" and violating the gapless-globalOrder invariant - it
+        // simply declines to guess and asks a human to resolve it first.
+        const staleRows = await findStaleRows(tx, {
+          verseIds: verseRows.map((row) => row.id),
+          wordIds: wordRows.map((row) => row.id)
+        });
+        if (
+          staleRows.staleVerseIds.length > 0 ||
+          staleRows.staleWordIds.length > 0
+        ) {
+          throw new Error(
+            `Sync refused: this database has ${staleRows.staleVerseIds.length} verse(s) and ${staleRows.staleWordIds.length} word(s) that are not present in this sync's payload ` +
+              `(verse ids: ${describeIds(staleRows.staleVerseIds)}; word ids: ${describeIds(staleRows.staleWordIds)}). ` +
+              "Canonical Quran text is expected to be permanent, so a payload missing previously-synced ids usually means either a transient provider problem " +
+              "(confirm the provider is healthy, then retry) or a genuine upstream change that needs a human to manually verify and resolve the specific row(s) " +
+              "before sync can proceed - see docs/quran-data-integrity.md. Sync never automatically deletes Quran data, so it cannot resolve this on its own."
+          );
+        }
+
         await upsertChapters(tx, chapterRows);
         await upsertPages(tx, pageRows);
-        // globalOrder carries a UNIQUE constraint used for sequential
-        // "next verse/word" lookups. Reassigning it in bulk via UPSERT can
-        // transiently collide mid-batch (row A takes the value row B is
-        // about to vacate) even though the final state is fully unique -
-        // Postgres checks UNIQUE per row, not once at statement/transaction
-        // end. Drop and recreate the indexes around the reorder so
-        // uniqueness is only enforced against the final, consistent state;
-        // if the final state is somehow NOT unique, CREATE UNIQUE INDEX
-        // fails and the whole transaction rolls back, so this cannot mask
-        // a genuine data problem.
-        await tx.$executeRaw`DROP INDEX "QuranVerse_globalOrder_key"`;
-        await tx.$executeRaw`DROP INDEX "QuranWord_globalOrder_key"`;
         await upsertVerses(tx, verseRows);
         await upsertWords(tx, wordRows);
-        await tx.$executeRaw`CREATE UNIQUE INDEX "QuranVerse_globalOrder_key" ON "QuranVerse"("globalOrder")`;
-        await tx.$executeRaw`CREATE UNIQUE INDEX "QuranWord_globalOrder_key" ON "QuranWord"("globalOrder")`;
+
+        // Full validation runs INSIDE the transaction, before commit: if
+        // it fails, the throw below aborts the transaction and every
+        // upsert in it rolls back together, so the active data is never
+        // left half-updated - a validation failure here means the live
+        // tables are byte-for-byte whatever they were before this sync
+        // started, not a mix of old and new rows.
+        const validation = await validateQuranData(tx);
+        if (!validation.ok) {
+          throw new Error(validation.errors.join("\n"));
+        }
+        return validation;
       },
       { timeout: 300_000, maxWait: 30_000 }
     );
 
-    const validation = await validateQuranData();
     await prisma.quranSyncRun.update({
       where: { id: run.id },
       data: {
-        status: validation.ok ? "COMPLETED" : "FAILED",
+        status: "COMPLETED",
         completedAt: new Date(),
-        message: validation.errors.join("\n") || null,
         chapters: chapterRows.length,
         pages: pageRows.length,
         verses: verseRows.length,
         words: wordRows.length
       }
     });
-    if (!validation.ok) throw new Error(validation.errors.join("\n"));
     return validation;
   } catch (error) {
     await prisma.quranSyncRun.update({
@@ -386,6 +431,53 @@ async function upsertWords(
         location = EXCLUDED.location
     `;
   }
+}
+
+/**
+ * Rows that exist in the live tables but were NOT part of this sync's
+ * payload (e.g. the provider stopped returning an id it previously did).
+ * Sync is upsert-only and never deletes, so this can never be resolved by
+ * silently ignoring it (a genuine provider change nobody notices) or by
+ * automatically deleting the row (a transient provider glitch destroying
+ * real Quran data, or - since globalOrder is a dense 1..N sequence
+ * recomputed from THIS payload every run - leaving a stale row in place
+ * would break that invariant on this and every future sync anyway). See
+ * the "never erase valid Quran data" rule in AGENT.md. The caller checks
+ * this BEFORE any upsert and refuses the whole sync if it finds anything,
+ * rather than letting it proceed into a state validateQuranData would
+ * very likely reject downstream regardless.
+ */
+async function findStaleRows(
+  tx: Prisma.TransactionClient,
+  current: { verseIds: readonly number[]; wordIds: readonly number[] }
+): Promise<StaleRowReport> {
+  // Sequential, not Promise.all: `tx` is a single interactive-transaction
+  // client bound to one reserved connection - see the same fix elsewhere
+  // in this codebase (lib/memorization/service.ts, reveal/service.ts).
+  //
+  // Raw SQL with a single array-typed parameter (`= ANY($1::int[])`)
+  // rather than Prisma's `notIn: [...]`, which compiles to one bind
+  // parameter PER array element - a real sync payload has 6236 verse ids
+  // and 77430 word ids, and Postgres's wire protocol caps a single Bind
+  // message at 65535 parameters, so `notIn` on the word-id list alone
+  // would exceed the limit and fail every real sync.
+  const staleVerses = await tx.$queryRaw<{ id: number }[]>`
+    SELECT id FROM "QuranVerse" WHERE NOT (id = ANY(${[...current.verseIds]}::int[]))
+  `;
+  const staleWords = await tx.$queryRaw<{ id: number }[]>`
+    SELECT id FROM "QuranWord" WHERE NOT (id = ANY(${[...current.wordIds]}::int[]))
+  `;
+  return {
+    staleVerseIds: staleVerses.map((row) => row.id),
+    staleWordIds: staleWords.map((row) => row.id)
+  };
+}
+
+/** First 20 ids plus a total, so a refusal error stays readable even when hundreds of rows are stale. */
+function describeIds(ids: readonly number[]): string {
+  if (ids.length === 0) return "none";
+  const shown = ids.slice(0, 20).join(", ");
+  return ids.length > 20 ? `${shown}, ... (${ids.length} total)` : shown;
 }
 
 function chunks<T>(items: readonly T[], size: number) {

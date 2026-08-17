@@ -1,6 +1,7 @@
 import "../lib/env";
 import { readFileSync } from "node:fs";
 import { prisma } from "../lib/db/prisma";
+import { assertLocalDatabaseUrl } from "../lib/db/test-database-guard";
 
 /**
  * Loads the committed Quran fixture (tests/fixtures/quran-dataset.json,
@@ -8,9 +9,12 @@ import { prisma } from "../lib/db/prisma";
  * at. Used by CI to populate an isolated, ephemeral Postgres service
  * container before running e2e tests - never used against a real/shared
  * database (there is no upsert-vs-existing-data safety here on purpose;
- * this is for a fresh CI database only).
+ * this is for a fresh CI database only, so assertLocalDatabaseUrl below
+ * refuses to run at all against anything else).
  */
 async function main() {
+  assertLocalDatabaseUrl(process.env.DATABASE_URL ?? "");
+
   const fixturePath = new URL(
     "../tests/fixtures/quran-dataset.json",
     import.meta.url
