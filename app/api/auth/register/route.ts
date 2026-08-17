@@ -8,7 +8,7 @@ import {
 import { credentialsSchema, hashPassword } from "@/lib/auth/password";
 import { authFormErrorCode } from "@/lib/auth/form-error";
 import {
-  REGISTER_MAX_ATTEMPTS,
+  REGISTER_IP_MAX_ATTEMPTS,
   checkAndRecordAttempt,
   clientIp
 } from "@/lib/auth/rate-limit";
@@ -20,8 +20,8 @@ export async function POST(request: Request) {
   const isJson = contentType.includes("application/json");
 
   try {
-    const rateLimitKey = `register:${clientIp(request)}`;
-    await checkAndRecordAttempt(rateLimitKey, REGISTER_MAX_ATTEMPTS);
+    const rateLimitKey = `register-ip:${clientIp(request)}`;
+    await checkAndRecordAttempt(rateLimitKey, REGISTER_IP_MAX_ATTEMPTS);
 
     const input = isJson
       ? credentialsSchema.parse(await request.json())

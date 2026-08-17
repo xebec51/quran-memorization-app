@@ -8,8 +8,11 @@ import {
 import { credentialsSchema, verifyPassword } from "@/lib/auth/password";
 import { authFormErrorCode } from "@/lib/auth/form-error";
 import {
-  LOGIN_MAX_ATTEMPTS,
-  checkAndRecordAttempt
+  LOGIN_IP_MAX_ATTEMPTS,
+  checkAndRecordAttempt,
+  clientIp,
+  recordLoginFailure,
+  resetLoginFailures
 } from "@/lib/auth/rate-limit";
 import { normalizeEmail } from "@/lib/utils";
 import { jsonError, jsonOk, routeError } from "@/lib/validation/api";
@@ -25,11 +28,27 @@ export async function POST(request: Request) {
           .omit({ name: true })
           .parse(Object.fromEntries(await request.formData()));
     const email = normalizeEmail(input.email);
-    const rateLimitKey = `login:${email}`;
-    await checkAndRecordAttempt(rateLimitKey, LOGIN_MAX_ATTEMPTS);
+
+    // Per-IP gate first, before any expensive work: bounds how many
+    // login attempts a single source can throw at the endpoint at all,
+    // regardless of which account(s) it targets.
+    await checkAndRecordAttempt(
+      `login-ip:${clientIp(request)}`,
+      LOGIN_IP_MAX_ATTEMPTS
+    );
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
+    const valid =
+      user && (await verifyPassword(input.password, user.passwordHash));
+
+    if (!valid) {
+      // Only failures count toward the per-account threshold - see
+      // recordLoginFailure. This can itself throw RateLimitedError once
+      // the account has accumulated too many wrong attempts, but a
+      // correct password (the `valid` branch below) is never gated on
+      // this counter, so the real owner is never locked out by someone
+      // else's guesses.
+      await recordLoginFailure(email);
       if (isJson) {
         return jsonError(
           "INVALID_CREDENTIALS",
@@ -42,6 +61,11 @@ export async function POST(request: Request) {
         303
       );
     }
+
+    // A correct password proves this is the real owner - clear any
+    // failure history (their own mistypes, or an attacker's guesses)
+    // rather than letting it linger toward a future false lockout.
+    await resetLoginFailures(email);
 
     const session = await createSessionRecord(user.id);
     const response = isJson

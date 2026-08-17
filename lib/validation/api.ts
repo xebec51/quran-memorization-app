@@ -19,6 +19,16 @@ export function jsonError(
 
 export function routeError(error: unknown) {
   if (error instanceof Response) return error;
+  // A malformed request body (invalid JSON) throws a native SyntaxError
+  // from request.json() before any Zod schema ever runs - a client
+  // mistake, not a server fault, so it must be 400, not fall through to
+  // the generic 500 below.
+  if (error instanceof SyntaxError)
+    return jsonError(
+      "MALFORMED_JSON",
+      "Permintaan bukan JSON yang valid.",
+      400
+    );
   if (error instanceof ZodError)
     return jsonError("VALIDATION_ERROR", "Permintaan tidak valid.", 422);
   if (error instanceof RateLimitedError) {
