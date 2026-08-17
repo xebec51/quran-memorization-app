@@ -465,7 +465,11 @@ async function allocatePackage(
     const boundaries: Awaited<ReturnType<typeof computeRevealBoundary>>[] = [];
     for (const source of sources) {
       boundaries.push(
-        await computeRevealBoundary(tx, source.anchorVerseId, source.primaryPageNumber)
+        await computeRevealBoundary(
+          tx,
+          source.anchorVerseId,
+          source.primaryPageNumber
+        )
       );
     }
 

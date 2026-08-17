@@ -102,7 +102,9 @@ export function EvaluationApp({
       // A deduped retry (server returned the attempt already created by an
       // earlier try with the same clientRequestId) must not be counted or
       // listed twice on the client either.
-      const alreadyRecorded = history.items.some((item) => item.id === attempt.id);
+      const alreadyRecorded = history.items.some(
+        (item) => item.id === attempt.id
+      );
       if (!alreadyRecorded) {
         setHistory((current) => ({
           items: [attempt, ...current.items],

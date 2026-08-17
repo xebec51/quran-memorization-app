@@ -60,7 +60,10 @@ export async function checkAndRecordAttempt(key: string, maxAttempts: number) {
 
   if (row.attemptCount > maxAttempts) {
     const elapsedMs = Date.now() - row.windowStart.getTime();
-    const retryAfterSeconds = Math.max(1, Math.ceil((WINDOW_MS - elapsedMs) / 1000));
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((WINDOW_MS - elapsedMs) / 1000)
+    );
     throw new RateLimitedError(retryAfterSeconds);
   }
 }

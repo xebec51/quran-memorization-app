@@ -33,7 +33,8 @@ export function isRetryablePersistenceConflict(error: unknown) {
   if (error && typeof error === "object") {
     const maybe = error as { cause?: { originalCode?: string }; name?: string };
     return (
-      maybe.cause?.originalCode === "40001" || maybe.name === "DriverAdapterError"
+      maybe.cause?.originalCode === "40001" ||
+      maybe.name === "DriverAdapterError"
     );
   }
   return false;

@@ -7,7 +7,10 @@ import {
 } from "@/lib/auth/session";
 import { credentialsSchema, verifyPassword } from "@/lib/auth/password";
 import { authFormErrorCode } from "@/lib/auth/form-error";
-import { LOGIN_MAX_ATTEMPTS, checkAndRecordAttempt } from "@/lib/auth/rate-limit";
+import {
+  LOGIN_MAX_ATTEMPTS,
+  checkAndRecordAttempt
+} from "@/lib/auth/rate-limit";
 import { normalizeEmail } from "@/lib/utils";
 import { jsonError, jsonOk, routeError } from "@/lib/validation/api";
 

@@ -98,7 +98,14 @@ export async function submitEvaluationAttempt(
 
     try {
       const attempt = await prisma.evaluationAttempt.create({
-        data: { userId, questionId, result, belCount, tuntunCount, clientRequestId },
+        data: {
+          userId,
+          questionId,
+          result,
+          belCount,
+          tuntunCount,
+          clientRequestId
+        },
         select: evaluationAttemptDtoSelect
       });
       return { ...attempt, createdAt: attempt.createdAt.toISOString() };
