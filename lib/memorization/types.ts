@@ -120,7 +120,6 @@ export type EvaluationBankItem = {
   questionId: string;
   fragmentText: string;
   lastResult: RecallAssessment;
-  primaryPageNumber: number;
   lastAttemptAt: string | null;
 };
 

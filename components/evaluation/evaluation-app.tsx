@@ -17,7 +17,6 @@ type BankItem = {
   questionId: string;
   fragmentText: string;
   lastResult: Assessment;
-  primaryPageNumber: number;
   lastAttemptAt: string | null;
 };
 
@@ -229,9 +228,6 @@ export function EvaluationApp({
                       ? "Belum ingat"
                       : "Sebagian benar"}
                   </span>
-                  <span className="text-xs text-[var(--muted)]">
-                    Halaman {item.primaryPageNumber}
-                  </span>
                 </div>
                 <p
                   className="quran-text text-right text-xl"
@@ -252,7 +248,7 @@ export function EvaluationApp({
           <div>
             <h2 className="font-semibold">Catat hasil latihan</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Halaman {selected.primaryPageNumber}
+              Ingat ayat berikut dari hafalan, lalu catat hasilnya.
             </p>
           </div>
           <p

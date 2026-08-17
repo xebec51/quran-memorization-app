@@ -19,7 +19,6 @@ const RESULT_PRIORITY: Record<RecallAssessment, number> = {
 const bankQuestionSelect = {
   id: true,
   visibleFragmentText: true,
-  primaryPageNumber: true,
   assessment: { select: { assessment: true } },
   evaluationAttempts: {
     orderBy: { createdAt: "desc" },
@@ -33,6 +32,11 @@ const bankQuestionSelect = {
  * assessment is MISSED or PARTIAL. Practicing it here never writes to
  * QuestionAssessment, so the bank membership only changes when the user
  * re-does the *main* question (not an evaluation attempt).
+ *
+ * Deliberately does not select/return primaryPageNumber (or any other
+ * hidden-metadata field - see AGENT.md "Hidden Metadata Rule"): this is
+ * the pre-attempt bank listing, so the client must not learn the page
+ * before the user has recalled the fragment from memory.
  */
 export async function getEvaluationBank(
   userId: string
@@ -51,7 +55,6 @@ export async function getEvaluationBank(
         questionId: question.id,
         fragmentText: question.visibleFragmentText,
         lastResult: question.assessment!.assessment,
-        primaryPageNumber: question.primaryPageNumber,
         lastAttemptAt:
           question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
       }))
