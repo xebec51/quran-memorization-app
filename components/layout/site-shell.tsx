@@ -1,10 +1,11 @@
 import Link from "next/link";
 import type { Route } from "next";
-import { BookOpen, BarChart3, History, Settings, Brain } from "lucide-react";
+import { BookOpen, BarChart3, History, Settings, Brain, ListChecks } from "lucide-react";
 import { productConfig } from "@/lib/config";
 
 const nav = [
   { href: "/memorization", label: "Latihan", icon: Brain },
+  { href: "/evaluation", label: "Evaluasi", icon: ListChecks },
   { href: "/reader", label: "Mushaf", icon: BookOpen },
   { href: "/analytics", label: "Analitik", icon: BarChart3 },
   { href: "/history", label: "Riwayat", icon: History },
@@ -37,7 +38,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto max-w-6xl px-4 py-6 md:py-8">{children}</main>
       <nav
         aria-label="Navigasi bawah"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-[var(--border)] bg-white md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-[var(--border)] bg-white md:hidden"
       >
         {nav.map((item) => (
           <Link key={item.href} href={item.href} className="flex flex-col items-center gap-1 px-1 py-2 text-xs">
