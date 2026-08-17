@@ -44,18 +44,68 @@ export default async function HistoryPage({
               {pkg.state === "COMPLETED" ? "Selesai" : "Berjalan"}
             </span>
           </div>
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
+          <div className="mt-3 grid gap-2 md:grid-cols-2">
             {pkg.questions.map((question) => (
-              <div
+              <details
                 key={question.id}
-                className="rounded-md bg-slate-50 p-3 text-sm"
+                className="rounded-md bg-slate-50 p-3 text-sm open:bg-white open:ring-1 open:ring-[var(--border)]"
               >
-                Soal {question.order}:{" "}
-                {question.assessment
-                  ? assessmentLabel(question.assessment)
-                  : "Belum dinilai"}{" "}
-                - {question.hints} petunjuk
-              </div>
+                <summary className="cursor-pointer list-none">
+                  Soal {question.order}:{" "}
+                  {question.assessment
+                    ? assessmentLabel(question.assessment)
+                    : "Belum dinilai"}{" "}
+                  - {question.hints} petunjuk
+                  {question.belCount !== null &&
+                  question.tuntunCount !== null ? (
+                    <>
+                      {" "}
+                      (bel {question.belCount}, tuntun {question.tuntunCount})
+                    </>
+                  ) : null}
+                </summary>
+                {question.fragmentText ? (
+                  <div className="mt-3 grid gap-3 border-t border-[var(--border)] pt-3">
+                    <div>
+                      <p className="text-xs text-[var(--muted)]">Soal:</p>
+                      <p
+                        className="quran-text text-right text-2xl"
+                        translate="no"
+                        lang="ar"
+                        dir="rtl"
+                      >
+                        {question.fragmentText}
+                      </p>
+                    </div>
+                    {question.revealedVerses?.length ? (
+                      <div className="grid gap-2">
+                        <p className="text-xs text-[var(--muted)]">
+                          Jawaban ({question.revealedVerses.length} ayat):
+                        </p>
+                        {question.revealedVerses.map((verse) => (
+                          <div key={verse.verseKey} className="grid gap-1">
+                            <p className="text-xs text-[var(--muted)]">
+                              {verse.surah} - {verse.verseKey}
+                            </p>
+                            <p
+                              className="quran-text text-right text-xl"
+                              translate="no"
+                              lang="ar"
+                              dir="rtl"
+                            >
+                              {verse.text}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="mt-3 border-t border-[var(--border)] pt-3 text-[var(--muted)]">
+                    Belum dinilai - jawaban belum tersedia untuk dibuka.
+                  </p>
+                )}
+              </details>
             ))}
           </div>
         </Card>

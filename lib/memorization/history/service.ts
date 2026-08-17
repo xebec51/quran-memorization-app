@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
+import type { RevealedAyah } from "../types";
 
 const packageHistorySelect = {
   id: true,
@@ -17,7 +18,11 @@ const packageHistorySelect = {
       id: true,
       orderInPackage: true,
       answerRevealedAt: true,
-      assessment: { select: { assessment: true } },
+      visibleFragmentText: true,
+      revealedVersesJson: true,
+      assessment: {
+        select: { assessment: true, belCount: true, tuntunCount: true }
+      },
       _count: { select: { hintEvents: true } }
     }
   }
@@ -51,7 +56,19 @@ export async function getPackageHistory(
           order: question.orderInPackage,
           answerRevealed: Boolean(question.answerRevealedAt),
           hints: question._count.hintEvents,
-          assessment: question.assessment?.assessment ?? null
+          assessment: question.assessment?.assessment ?? null,
+          belCount: question.assessment?.belCount ?? null,
+          tuntunCount: question.assessment?.tuntunCount ?? null,
+          // Only meaningful to show once the question has actually been
+          // assessed - an in-progress/unassessed question's answer is
+          // still hidden metadata (see AGENT.md "Hidden Metadata Rule"),
+          // even in the user's own history.
+          fragmentText: question.assessment
+            ? question.visibleFragmentText
+            : null,
+          revealedVerses: question.assessment
+            ? (question.revealedVersesJson as unknown as RevealedAyah[])
+            : null
         }))
       }),
       (pkg) => pkg.id
