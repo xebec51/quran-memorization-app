@@ -1,10 +1,14 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 
 test("critical memorization flow", async ({
   page,
   request,
   context
 }, testInfo) => {
+  // Revealing through the entire boundary page (not just the primary page)
+  // for all 4 questions is real additional work versus the old, shorter
+  // (buggy) boundary - give this room accordingly.
+  test.setTimeout(240_000);
   const email = `e2e-${testInfo.project.name}-${Date.now()}@example.com`;
   const password = "e2e-password-123";
 
@@ -49,17 +53,13 @@ test("critical memorization flow", async ({
   await expect(page.getByLabel("Pertanyaan").getByRole("button")).toHaveCount(
     4
   );
-  await expect(
-    page.getByRole("button", { name: "Soal selesai dijawab" })
-  ).toBeVisible();
 
-  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
-  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
-  await page.getByRole("button", { name: "Benar", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Latihan Expert" })
-  ).toBeVisible();
+  // Grading is gated on a complete reveal - there is no "grade early"
+  // shortcut anymore, so "Evaluasi jawaban" must not be visible yet.
+  await expect(page.getByText("Evaluasi jawaban")).toHaveCount(0);
 
+  // Question 1: exercise every hint type (independent of reveal progress),
+  // then reveal fully and grade "Benar".
   await page.getByRole("button", { name: "Juz" }).click();
   await expect(page.getByText(/Petunjuk Juz/)).toBeVisible();
 
@@ -72,9 +72,15 @@ test("critical memorization flow", async ({
   await page.getByRole("button", { name: "Ayat", exact: true }).click();
   await expect(page.getByText(/Ayat berikutnya/)).toBeVisible();
 
+  // While attempting to switch to another question before this one's
+  // reveal is complete is disallowed: the other question buttons are
+  // disabled.
+  await expect(
+    page.getByLabel("Pertanyaan").getByRole("button", { name: /^Soal 2/ })
+  ).toBeDisabled();
+
   // Progressive reveal: first click shows exactly ayah 1, staying visible
-  // as later clicks accumulate more, per docs/memorization-engine.md
-  // "Progressive Reveal".
+  // as later clicks accumulate more.
   await page.getByRole("button", { name: "Lihat Ayat Pertama" }).click();
   await expect(page.getByText(/Ayat 1\/\d+ terbuka/)).toBeVisible();
   await expect(
@@ -84,21 +90,30 @@ test("critical memorization flow", async ({
   await page.getByRole("button", { name: "Lihat Ayat Berikutnya" }).click();
   await expect(page.getByText(/Ayat 2\/\d+ terbuka/)).toBeVisible();
 
-  // Reveal is only partial here, so the assessment panel isn't shown
-  // automatically yet - the independent "sudah cukup, nilai sekarang" path
-  // opens it explicitly.
-  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  // Reveal is only partial here - grading must still be unavailable, both
+  // visually and (proven separately in reveal.spec.ts) server-side.
+  await expect(page.getByText("Evaluasi jawaban")).toHaveCount(0);
+
+  await revealFully(page);
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
+  await page.getByRole("button", { name: "Benar", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Latihan Expert" })
+  ).toBeVisible();
+
+  // Questions 2-4: reveal fully then grade PARTIAL, CORRECT, MISSED.
+  await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await page.getByRole("button", { name: "Sebagian benar" }).click();
   await expect(
     page.getByRole("heading", { name: "Latihan Expert" })
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await page.getByRole("button", { name: "Benar", exact: true }).click();
 
-  await page.getByRole("button", { name: "Soal selesai dijawab" }).click();
+  await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await page.getByRole("button", { name: "Belum ingat" }).click();
   await expect(
@@ -139,3 +154,38 @@ test("critical memorization flow", async ({
   await page.getByRole("button", { name: "Buka" }).click();
   await expect(page.locator(".quran-text").first()).toBeVisible();
 });
+
+/**
+ * Clicks the reveal button repeatedly until "Evaluasi jawaban" appears -
+ * the panel only shows once reveal.isComplete (see
+ * components/memorization/memorization-app.tsx). Waits for the button to
+ * be back in its stable "Lihat Ayat ..." label before each click, rather
+ * than just checking its presence: while a reveal request is in flight
+ * the label briefly reads "Membuka...", which would otherwise make a
+ * bare count()-based loop mistake an in-flight request for completion
+ * and exit early.
+ */
+async function revealFully(page: Page) {
+  const gradingPanel = page.getByText("Evaluasi jawaban");
+  const revealButton = page.getByRole("button", {
+    name: /^Lihat Ayat (Pertama|Berikutnya)$/
+  });
+  let guard = 0;
+  while (guard < 60) {
+    if ((await gradingPanel.count()) > 0) return;
+    try {
+      await expect(revealButton).toBeVisible({ timeout: 10_000 });
+    } catch {
+      // The last reveal click may have completed the boundary between the
+      // two checks above (transitioning straight from "Membuka..." to the
+      // grading panel) - re-check before treating this as a real failure.
+      if ((await gradingPanel.count()) > 0) return;
+      throw new Error(
+        "revealFully: neither the reveal button nor the grading panel is present"
+      );
+    }
+    await revealButton.click();
+    guard += 1;
+  }
+  throw new Error("revealFully did not reach completion within 60 clicks");
+}

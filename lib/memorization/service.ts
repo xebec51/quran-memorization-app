@@ -8,7 +8,12 @@ import { createCyclePlan } from "./cycle/plan";
 import { CryptoRandomSource, SeededRandomSource } from "./random";
 import { generateQuestionSource, nextBucket } from "./question/generator";
 import { computeRevealBoundary } from "./reveal/service";
-import { alreadyAssessedError, hintLimitError, notFoundError } from "./errors";
+import {
+  alreadyAssessedError,
+  hintLimitError,
+  notFoundError,
+  revealIncompleteError
+} from "./errors";
 import { retrySerialization } from "./persistence-retry";
 import type {
   AssessmentMutationResult,
@@ -326,9 +331,21 @@ export async function submitAssessment(
         async (tx) => {
           const question = await tx.memorizationQuestion.findFirst({
             where: { id: questionId, userId },
-            select: { id: true, packageId: true }
+            select: {
+              id: true,
+              packageId: true,
+              revealedAyahCount: true,
+              revealTotalAyahCount: true
+            }
           });
           if (!question) throw notFoundError();
+          // Self-assessment is only meaningful once the user has actually
+          // seen the whole answer - never allow grading, or (by extension,
+          // enforced client-side) moving on to another question, before
+          // the full reveal for this question has completed.
+          if (question.revealedAyahCount < question.revealTotalAyahCount) {
+            throw revealIncompleteError();
+          }
 
           await tx.questionAssessment.upsert({
             where: { questionId },

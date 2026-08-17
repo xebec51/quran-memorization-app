@@ -7,7 +7,6 @@ import {
   Eye,
   Lightbulb,
   MapPinned,
-  Search,
   StepForward
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -115,6 +114,14 @@ export function MemorizationApp({
   const questionActionsBusy = pendingAction !== null;
   const canUseQuestionActions = Boolean(
     question && !questionActionsBusy && !questionComplete && !packageComplete
+  );
+  // The active question must be fully revealed (or already assessed)
+  // before the user can navigate away to a different question in the
+  // package - grading, switching questions, and advancing are all gated
+  // on reveal completeness, enforced here and again server-side in
+  // submitAssessment.
+  const canSwitchQuestion = Boolean(
+    question && (question.reveal.isComplete || questionComplete)
   );
 
   function beginAction(action: Exclude<PendingAction, null>) {
@@ -356,7 +363,15 @@ export function MemorizationApp({
         {pkg.questions.map((item, index) => (
           <button
             key={item.id}
-            disabled={questionActionsBusy}
+            disabled={
+              questionActionsBusy ||
+              (index !== activeIndex && !canSwitchQuestion)
+            }
+            aria-label={
+              index !== activeIndex && !canSwitchQuestion
+                ? `Soal ${item.order} - buka seluruh ayat soal saat ini dahulu`
+                : `Soal ${item.order}`
+            }
             onClick={() => {
               setActiveIndex(index);
             }}
@@ -436,13 +451,13 @@ function QuestionPanel({
   onRevealNext: () => void;
   onAssess: (assessment: Assessment) => void;
 }) {
-  const [assessmentRequested, setAssessmentRequested] = useState(false);
   const questionComplete = question.assessment !== null;
   const reveal = question.reveal;
-  // Auto-show once the whole page has been revealed, in addition to the
-  // user explicitly clicking "Soal selesai dijawab" - derived directly
-  // during render instead of synced via an effect.
-  const assessmentOpen = assessmentRequested || reveal.isComplete;
+  // Grading is only allowed once the entire boundary has been revealed -
+  // enforced again server-side in submitAssessment - so there is no
+  // separate "grade early" affordance; this panel simply appears once
+  // reveal.isComplete, derived directly during render.
+  const assessmentOpen = reveal.isComplete;
   const revealButtonLabel = useMemo(() => {
     if (pendingAction === "reveal") return "Membuka...";
     return reveal.revealedAyahCount === 0
@@ -539,21 +554,14 @@ function QuestionPanel({
           ))}
         </div>
       ) : null}
-      <div className="grid gap-2 sm:grid-cols-2">
+      {!reveal.isComplete ? (
         <Button
           onClick={onRevealNext}
           disabled={!canUseQuestionActions || reveal.isComplete}
         >
           <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
         </Button>
-        <Button
-          variant="secondary"
-          onClick={() => setAssessmentRequested(true)}
-          disabled={!canUseQuestionActions}
-        >
-          <Search aria-hidden className="h-4 w-4" /> Soal selesai dijawab
-        </Button>
-      </div>
+      ) : null}
       {reveal.verses.length > 0 ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm text-[var(--muted)]">

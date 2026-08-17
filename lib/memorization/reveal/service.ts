@@ -1,6 +1,7 @@
 import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { productConfig } from "@/lib/config";
 import { measureServerTiming } from "@/lib/performance/timing";
 import { alreadyAssessedError, notFoundError } from "@/lib/memorization/errors";
 import { retrySerialization } from "@/lib/memorization/persistence-retry";
@@ -13,7 +14,15 @@ import type { RevealMutationResult, RevealedAyah } from "../types";
  * would repeat the same word/verse lookups on every reveal click; storing
  * them keeps that lookup a one-time cost per question.
  *
- * "Last word by globalOrder on primaryPageNumber" only produces the
+ * Reveal must continue through the ENTIRE page after the question's
+ * primary page, not stop at the end of the primary page itself - e.g. a
+ * question anchored on page 1 must reveal through the last ayah touching
+ * page 2 (2:5), not stop at the last ayah touching page 1 (1:7). Page 604
+ * (the last Mushaf page) is its own boundary: min(primaryPageNumber + 1,
+ * mushafPages) naturally handles both the general case and the
+ * end-of-Quran case without a separate branch.
+ *
+ * "Last word by globalOrder on the boundary page" only produces the
  * correct verse because QuranWord.globalOrder follows true canonical
  * (chapter, verse, position) order - see the fix in lib/quran/sync/sync.ts.
  */
@@ -22,14 +31,18 @@ export async function computeRevealBoundary(
   anchorVerseId: number,
   primaryPageNumber: number
 ) {
+  const boundaryPageNumber = Math.min(
+    primaryPageNumber + 1,
+    productConfig.mushafPages
+  );
   const lastWordOnPage = await tx.quranWord.findFirst({
-    where: { pageNumber: primaryPageNumber, charTypeName: "word" },
+    where: { pageNumber: boundaryPageNumber, charTypeName: "word" },
     orderBy: { globalOrder: "desc" },
     select: { verseId: true }
   });
   if (!lastWordOnPage) {
     throw new Error(
-      `No words found for page ${primaryPageNumber}; run quran:sync first.`
+      `No words found for page ${boundaryPageNumber}; run quran:sync first.`
     );
   }
 

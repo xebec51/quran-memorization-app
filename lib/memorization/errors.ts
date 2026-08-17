@@ -22,3 +22,9 @@ export const revealCompleteError = () =>
     "Seluruh ayat pada halaman ini sudah terbuka.",
     409
   );
+export const revealIncompleteError = () =>
+  new DomainError(
+    "REVEAL_INCOMPLETE",
+    "Buka seluruh ayat pada halaman ini sebelum menilai jawaban.",
+    409
+  );
