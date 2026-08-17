@@ -1,6 +1,7 @@
 import { productConfig } from "@/lib/config";
 import type { HintType } from "../types";
 import { joinArabicWords } from "../question/generator";
+import { hintLimitError } from "../errors";
 
 export type HintProjection = {
   type: HintType;
@@ -16,7 +17,7 @@ export function assertHintLimit(type: HintType, existingCount: number) {
         ? productConfig.nextVerseLimit
         : 1;
   if (existingCount >= limit) {
-    throw new Error("Batas petunjuk untuk pertanyaan ini sudah tercapai.");
+    throw hintLimitError("Batas petunjuk untuk pertanyaan ini sudah tercapai.");
   }
 }
 
