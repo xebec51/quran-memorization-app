@@ -113,6 +113,8 @@ export type HintMutationResult = {
 export type AssessmentMutationResult = {
   questionId: string;
   assessment: RecallAssessment;
+  belCount: number;
+  tuntunCount: number;
   packageCompleted: boolean;
 };
 

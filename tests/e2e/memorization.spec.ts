@@ -69,9 +69,6 @@ test("critical memorization flow", async ({
   await page.getByRole("button", { name: "Tambah" }).click();
   await expect(page.getByText(/Fragmen/)).toBeVisible();
 
-  await page.getByRole("button", { name: "Ayat", exact: true }).click();
-  await expect(page.getByText(/Ayat berikutnya/)).toBeVisible();
-
   // While attempting to switch to another question before this one's
   // reveal is complete is disallowed: the other question buttons are
   // disabled.
@@ -96,26 +93,28 @@ test("critical memorization flow", async ({
 
   await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
-  await page.getByRole("button", { name: "Benar", exact: true }).click();
+  await submitBelTuntun(page, 0, 0);
   await expect(
     page.getByRole("heading", { name: "Latihan Expert" })
   ).toBeVisible();
 
-  // Questions 2-4: reveal fully then grade PARTIAL, CORRECT, MISSED.
+  // Questions 2-4: reveal fully then submit bel/tuntun counts - 0/0
+  // derives to CORRECT, anything else derives to MISSED (see
+  // lib/memorization/service.ts's deriveAssessment).
   await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
-  await page.getByRole("button", { name: "Sebagian benar" }).click();
+  await submitBelTuntun(page, 1, 0);
   await expect(
     page.getByRole("heading", { name: "Latihan Expert" })
   ).toBeVisible();
 
   await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
-  await page.getByRole("button", { name: "Benar", exact: true }).click();
+  await submitBelTuntun(page, 0, 0);
 
   await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
-  await page.getByRole("button", { name: "Belum ingat" }).click();
+  await submitBelTuntun(page, 0, 2);
   await expect(
     page.getByRole("heading", { name: "Paket selesai" })
   ).toBeVisible();
@@ -161,11 +160,94 @@ test("critical memorization flow", async ({
   ).toBeVisible();
   await expect(page.getByText("Selesai")).toBeVisible();
 
+  // Opening a history entry reveals the fragment and the full answer for
+  // an already-assessed question - all 4 questions in this run were
+  // assessed, so the first <summary> is guaranteed to expand into real
+  // content, not the "belum dinilai" fallback. Scoped to this one
+  // <details> element throughout: a closed <details> still keeps its
+  // content in the DOM (native browser behavior, just visually hidden),
+  // so an unscoped page-wide getByText matches every question's
+  // "Jawaban (N ayat):" text regardless of which one is actually open.
+  const soal1History = page.locator("details", { hasText: "Soal 1:" }).first();
+  await soal1History.locator("summary").click();
+  await expect(soal1History.locator(".quran-text").first()).toBeVisible();
+  await expect(soal1History.getByText(/^Jawaban \(\d+ ayat\):/)).toBeVisible();
+
   await page.goto("/reader");
   await expect(page.getByRole("heading", { name: "Mushaf" })).toBeVisible();
   await page.getByRole("button", { name: "Buka" }).click();
   await expect(page.locator(".quran-text").first()).toBeVisible();
 });
+
+test("'Soal selesai dijawab' reveals everything and opens grading without manual per-ayah clicks", async ({
+  page,
+  request,
+  context
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const email = `e2e-finish-${testInfo.project.name}-${Date.now()}@example.com`;
+  const password = "e2e-password-123";
+
+  const register = await request.post("/api/auth/register", {
+    data: { email, password, name: "E2E Finish" }
+  });
+  expect(register.ok()).toBe(true);
+  const cookieHeader = register.headers()["set-cookie"];
+  const [nameValue] = cookieHeader.split(";");
+  const separatorIndex = nameValue.indexOf("=");
+  await context.addCookies([
+    {
+      name: nameValue.slice(0, separatorIndex),
+      value: nameValue.slice(separatorIndex + 1),
+      domain: "127.0.0.1",
+      path: "/",
+      httpOnly: true,
+      sameSite: "Lax"
+    }
+  ]);
+
+  await page.goto("/memorization");
+  await page
+    .getByRole("button", { name: "Mulai latihan" })
+    .click({ timeout: 30_000 });
+  await expect(page.getByText(/Paket 1/)).toBeVisible({ timeout: 30_000 });
+
+  // Available immediately, before any ayah has been opened - no manual
+  // "Lihat Ayat Pertama" click first.
+  await expect(
+    page.getByRole("button", { name: "Lihat Ayat Pertama" })
+  ).toBeVisible();
+  const finishButton = page.getByRole("button", {
+    name: "Soal selesai dijawab"
+  });
+  await expect(finishButton).toBeVisible();
+  await finishButton.click();
+
+  // The gate is unchanged - grading only appears once reveal is
+  // genuinely complete, it's just reached via one click instead of many.
+  await expect(page.getByText("Evaluasi jawaban")).toBeVisible({
+    timeout: 60_000
+  });
+  await expect(
+    page.getByText(/^Ayat \d+\/\d+ terbuka - halaman/)
+  ).toBeVisible();
+
+  await submitBelTuntun(page, 0, 0);
+  await expect(
+    page.getByRole("heading", { name: "Latihan Expert" })
+  ).toBeVisible();
+});
+
+/** Fills the bel/tuntun inputs and submits the assessment form. */
+async function submitBelTuntun(
+  page: Page,
+  belCount: number,
+  tuntunCount: number
+) {
+  await page.getByLabel("Jumlah bel").fill(String(belCount));
+  await page.getByLabel("Jumlah tuntun").fill(String(tuntunCount));
+  await page.getByRole("button", { name: "Simpan evaluasi" }).click();
+}
 
 /**
  * Clicks the reveal button repeatedly until "Evaluasi jawaban" appears -

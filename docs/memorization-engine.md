@@ -52,7 +52,7 @@ Hints are independent:
 - `JUZ`: reveals only `Juz N`, once.
 - `SURAH`: reveals only the surah name, once.
 - `EXTEND_FRAGMENT`: progressively increases visible contiguous words from the same ayah beginning, initially limited to 3 requests.
-- `NEXT_VERSE`: reveals the next complete ayah by canonical order, initially limited to 3 requests.
+- `NEXT_VERSE`: reveals the next complete ayah by canonical order, initially limited to 3 requests. No longer exposed as a UI button in the main package view (redundant with progressive reveal itself, and with "Soal selesai dijawab" - see below) - the hint type, its API route, and historical `HintEvent` rows of this type are untouched, so this is a pure UI simplification, not a capability removal.
 
 Hint-only pages never consume primary page eligibility.
 
@@ -81,13 +81,37 @@ click (`revealNextAyah`) is guarded by an `expectedRevealedCount`
 optimistic-concurrency token: a duplicate click or network retry that
 arrives after an earlier one already landed simply observes a mismatch
 and returns the current state instead of advancing twice, and the whole
-mutation runs inside a `Serializable` transaction. Grading a question
-(`submitAssessment`) and switching to another question in the same
-package are both rejected server-side - not just hidden in the UI - until
-`revealedAyahCount >= revealTotalAyahCount`. A saved assessment is
-immutable: resubmitting the identical payload replays the same result
-idempotently; a different payload for an already-assessed question is a
-409 conflict, never a silent overwrite.
+mutation runs inside a `Serializable` transaction. `nthVerseFromAnchor`
+(the query behind every single-ayah reveal) is one round trip to
+Postgres, not two - the anchor verse's `globalOrder` is looked up in a
+subquery evaluated by Postgres itself rather than fetched client-side
+first, since this runs on every click and is the hottest path in the app.
+
+"Soal selesai dijawab" (`revealAll` in
+`components/memorization/memorization-app.tsx`) does not bypass any of
+this - it is a client-side loop that calls the exact same reveal endpoint
+repeatedly until complete, for a user who already answered from memory
+and doesn't want to click through one ayah at a time. The correct answer
+still only ever arrives from the server one ayah at a time; it is never
+sent to the client ahead of what's been revealed, since that would leak
+the hidden answer to network/dev-tools inspection before the user has
+earned it.
+
+Grading a question (`submitAssessment`) and switching to another question
+in the same package are both rejected server-side - not just hidden in
+the UI - until `revealedAyahCount >= revealTotalAyahCount`.
+Self-assessment is objective MHQ-style scoring, not a subjective
+three-way choice: the user reports `belCount` (bell rings) and
+`tuntunCount` (prompts needed); the stored `assessment` enum is derived
+(`deriveAssessment` in `lib/memorization/service.ts`), not chosen -
+`belCount === 0 && tuntunCount === 0` is `CORRECT`, anything else is
+`MISSED`. `PARTIAL` is never produced by a new submission and remains a
+valid value only on historical `QuestionAssessment` rows created before
+this change (see the schema comment on that model) - those rows are
+never reinterpreted or backfilled. A saved assessment is immutable:
+resubmitting the identical `(belCount, tuntunCount)` pair replays the
+same result idempotently; a different pair for an already-assessed
+question is a 409 conflict, never a silent overwrite.
 
 ## Evaluation Practice Mode
 

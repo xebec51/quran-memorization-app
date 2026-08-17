@@ -87,32 +87,45 @@ test("hint and assessment mutation responses stay minimal and idempotent", async
 
   const firstAssessment = await request.post("/api/memorization/assessment", {
     headers: { cookie },
-    data: { questionId, assessment: "CORRECT" }
+    data: { questionId, belCount: 0, tuntunCount: 0 }
   });
   expect(firstAssessment.ok()).toBe(true);
   expect(await firstAssessment.json()).toEqual({
-    data: { questionId, assessment: "CORRECT", packageCompleted: false }
+    data: {
+      questionId,
+      assessment: "CORRECT",
+      belCount: 0,
+      tuntunCount: 0,
+      packageCompleted: false
+    }
   });
 
   const duplicateAssessment = await request.post(
     "/api/memorization/assessment",
     {
       headers: { cookie },
-      data: { questionId, assessment: "CORRECT" }
+      data: { questionId, belCount: 0, tuntunCount: 0 }
     }
   );
   expect(duplicateAssessment.ok()).toBe(true);
   expect(await duplicateAssessment.json()).toEqual({
-    data: { questionId, assessment: "CORRECT", packageCompleted: false }
+    data: {
+      questionId,
+      assessment: "CORRECT",
+      belCount: 0,
+      tuntunCount: 0,
+      packageCompleted: false
+    }
   });
 
   // An assessment is immutable once saved: a resubmission with a
-  // DIFFERENT value must conflict, not silently overwrite graded history.
+  // DIFFERENT bel/tuntun pair must conflict, not silently overwrite
+  // graded history.
   const conflictingAssessment = await request.post(
     "/api/memorization/assessment",
     {
       headers: { cookie },
-      data: { questionId, assessment: "MISSED" }
+      data: { questionId, belCount: 1, tuntunCount: 0 }
     }
   );
   expect(conflictingAssessment.status()).toBe(409);

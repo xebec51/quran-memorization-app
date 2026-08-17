@@ -301,7 +301,20 @@ model QuestionAssessment {
   userId     String
   questionId String           @unique
   assessment RecallAssessment
-  createdAt  DateTime         @default(now())
+  // Objective MHQ-style scoring: number of bell rings / prompts needed
+  // during self-assessment, replacing the old subjective three-way
+  // Benar/Sebagian benar/Belum ingat choice. Nullable and additive -
+  // existing rows created before this column existed keep their original
+  // `assessment` value untouched and simply have NULL here; they are
+  // never backfilled or reinterpreted. `assessment` itself is now derived
+  // from these two counts for every NEW row (belCount = 0 AND
+  // tuntunCount = 0 -> CORRECT, anything else -> MISSED) rather than
+  // chosen directly, so the evaluation bank's existing
+  // `assessment IN (MISSED, PARTIAL)` eligibility check keeps working
+  // unchanged for both old and new rows.
+  belCount    Int?
+  tuntunCount Int?
+  createdAt   DateTime         @default(now())
 
   user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)

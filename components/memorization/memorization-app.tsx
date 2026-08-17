@@ -5,9 +5,9 @@ import {
   BookMarked,
   CheckCircle2,
   Eye,
+  FastForward,
   Lightbulb,
-  MapPinned,
-  StepForward
+  MapPinned
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -58,7 +58,8 @@ type PackageDto = {
   activeQuestionId: string | null;
 };
 
-type PendingAction = "package" | "reveal" | `hint:${string}` | null;
+type PendingAction =
+  "package" | "reveal" | "reveal-all" | `hint:${string}` | null;
 
 type HintMutation = {
   questionId: string;
@@ -72,7 +73,15 @@ type RevealMutation = RevealProgress & { questionId: string };
 type AssessmentMutation = {
   questionId: string;
   assessment: Assessment;
+  belCount: number;
+  tuntunCount: number;
   packageCompleted: boolean;
+};
+
+type PendingAssessment = {
+  assessment: Assessment;
+  belCount: number;
+  tuntunCount: number;
 };
 
 function firstActiveIndex(pkg: PackageDto) {
@@ -96,7 +105,7 @@ export function MemorizationApp({
   );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pendingAssessments, setPendingAssessments] = useState<
-    Record<string, Assessment>
+    Record<string, PendingAssessment>
   >({});
   const [error, setError] = useState<string | null>(null);
   const actionLockRef = useRef(false);
@@ -191,6 +200,29 @@ export function MemorizationApp({
     }
   }
 
+  function applyRevealMutation(data: RevealMutation) {
+    setPkg((current) =>
+      current
+        ? {
+            ...current,
+            questions: current.questions.map((item) =>
+              item.id === data.questionId
+                ? {
+                    ...item,
+                    reveal: {
+                      revealedAyahCount: data.revealedAyahCount,
+                      totalAyahCount: data.totalAyahCount,
+                      isComplete: data.isComplete,
+                      verses: data.verses
+                    }
+                  }
+                : item
+            )
+          }
+        : current
+    );
+  }
+
   async function revealNext() {
     if (!question || !canUseQuestionActions) return;
     if (!beginAction("reveal")) return;
@@ -200,26 +232,7 @@ export function MemorizationApp({
         questionId: question.id,
         expectedRevealedCount
       });
-      setPkg((current) =>
-        current
-          ? {
-              ...current,
-              questions: current.questions.map((item) =>
-                item.id === data.questionId
-                  ? {
-                      ...item,
-                      reveal: {
-                        revealedAyahCount: data.revealedAyahCount,
-                        totalAyahCount: data.totalAyahCount,
-                        isComplete: data.isComplete,
-                        verses: data.verses
-                      }
-                    }
-                  : item
-              )
-            }
-          : current
-      );
+      applyRevealMutation(data);
       if (revealAnnounceRef.current) {
         const last = data.verses[data.verses.length - 1];
         revealAnnounceRef.current.textContent = last
@@ -235,11 +248,61 @@ export function MemorizationApp({
     }
   }
 
-  async function assess(assessment: Assessment) {
+  /**
+   * "Soal selesai dijawab" - lets a user who already answered from memory
+   * (on paper, out loud, in their head) skip clicking through one ayah at
+   * a time. This does NOT bypass the reveal-completion gate on grading -
+   * it just calls the exact same /api/memorization/reveal endpoint
+   * revealNext does, repeatedly, until isComplete, then the existing
+   * grading panel appears exactly as it would after manual clicks. The
+   * server-side requirement that grading only follows a fully-revealed
+   * question (submitAssessment's revealIncompleteError) is untouched.
+   */
+  async function revealAll() {
+    if (!question || !canUseQuestionActions) return;
+    if (!beginAction("reveal-all")) return;
+    const questionId = question.id;
+    let expectedRevealedCount = question.reveal.revealedAyahCount;
+    let isComplete = question.reveal.isComplete;
+    try {
+      while (!isComplete) {
+        const data = await apiFetch<RevealMutation>(
+          "/api/memorization/reveal",
+          { questionId, expectedRevealedCount }
+        );
+        expectedRevealedCount = data.revealedAyahCount;
+        isComplete = data.isComplete;
+        applyRevealMutation(data);
+        if (revealAnnounceRef.current) {
+          revealAnnounceRef.current.textContent = isComplete
+            ? `Seluruh ${data.totalAyahCount} ayat telah terbuka.`
+            : `Membuka ayat ${data.revealedAyahCount} dari ${data.totalAyahCount}...`;
+        }
+      }
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Gagal membuka seluruh ayat."
+      );
+    } finally {
+      endAction();
+    }
+  }
+
+  // Zero of both is a clean pass; anything else needs re-evaluation - see
+  // the identical rule in lib/memorization/service.ts's deriveAssessment,
+  // which is the actual source of truth. This client-side copy is only
+  // for the optimistic update below; the server's derivation is what
+  // actually gets persisted.
+  function deriveAssessment(belCount: number, tuntunCount: number): Assessment {
+    return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
+  }
+
+  async function assess(belCount: number, tuntunCount: number) {
     if (!pkg || !question || inFlightAssessmentsRef.current.has(question.id))
       return;
 
     const assessedQuestion = question;
+    const assessment = deriveAssessment(belCount, tuntunCount);
     const previousPackage = pkg;
     const previousIndex = activeIndex;
     const nextQuestions = pkg.questions.map((item) =>
@@ -252,7 +315,7 @@ export function MemorizationApp({
     inFlightAssessmentsRef.current.add(assessedQuestion.id);
     setPendingAssessments((current) => ({
       ...current,
-      [assessedQuestion.id]: assessment
+      [assessedQuestion.id]: { assessment, belCount, tuntunCount }
     }));
     setError(null);
     setPkg({
@@ -273,7 +336,8 @@ export function MemorizationApp({
         "/api/memorization/assessment",
         {
           questionId: assessedQuestion.id,
-          assessment
+          belCount,
+          tuntunCount
         },
         { keepalive: true }
       );
@@ -406,6 +470,7 @@ export function MemorizationApp({
           pendingAssessment={pendingAssessments[question.id] ?? null}
           onHint={requestHint}
           onRevealNext={revealNext}
+          onRevealAll={revealAll}
           onAssess={assess}
         />
       </Card>
@@ -447,15 +512,17 @@ function QuestionPanel({
   pendingAssessment,
   onHint,
   onRevealNext,
+  onRevealAll,
   onAssess
 }: {
   question: Question;
   pendingAction: PendingAction;
   canUseQuestionActions: boolean;
-  pendingAssessment: Assessment | null;
+  pendingAssessment: PendingAssessment | null;
   onHint: (type: string) => void;
   onRevealNext: () => void;
-  onAssess: (assessment: Assessment) => void;
+  onRevealAll: () => void;
+  onAssess: (belCount: number, tuntunCount: number) => void;
 }) {
   const questionComplete = question.assessment !== null;
   const reveal = question.reveal;
@@ -492,10 +559,11 @@ function QuestionPanel({
       ) : null}
       {pendingAssessment ? (
         <div className="rounded-md bg-slate-50 p-3 text-sm text-[var(--muted)]">
-          Menyimpan: {assessmentLabel(pendingAssessment)}
+          Menyimpan: {assessmentLabel(pendingAssessment.assessment)} (bel{" "}
+          {pendingAssessment.belCount}, tuntun {pendingAssessment.tuntunCount})
         </div>
       ) : null}
-      <div className="grid gap-2 sm:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-3">
         <Button
           variant="secondary"
           disabled={!canUseQuestionActions || !question.availableHints.juz}
@@ -518,15 +586,6 @@ function QuestionPanel({
           onClick={() => onHint("EXTEND_FRAGMENT")}
         >
           <Lightbulb aria-hidden className="h-4 w-4" /> Tambah
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={
-            !canUseQuestionActions || !question.availableHints.nextVerse
-          }
-          onClick={() => onHint("NEXT_VERSE")}
-        >
-          <StepForward aria-hidden className="h-4 w-4" /> Ayat
         </Button>
       </div>
       {question.hints.length ? (
@@ -560,14 +619,6 @@ function QuestionPanel({
           ))}
         </div>
       ) : null}
-      {!reveal.isComplete ? (
-        <Button
-          onClick={onRevealNext}
-          disabled={!canUseQuestionActions || reveal.isComplete}
-        >
-          <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
-        </Button>
-      ) : null}
       {reveal.verses.length > 0 ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm text-[var(--muted)]">
@@ -590,33 +641,132 @@ function QuestionPanel({
               </p>
             </div>
           ))}
+          {pendingAction === "reveal" ? <RevealSkeletonRow /> : null}
+        </div>
+      ) : pendingAction === "reveal" ? (
+        <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+          <RevealSkeletonRow />
+        </div>
+      ) : null}
+      {/* Below the revealed-ayat list, not above it, so the button stays
+          anchored right after the last-opened ayah as the list grows -
+          requested explicitly so the reveal action always sits next to
+          what it just added, not scrolled away above a growing list. */}
+      {!reveal.isComplete ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button
+            onClick={onRevealNext}
+            disabled={!canUseQuestionActions || reveal.isComplete}
+          >
+            <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onRevealAll}
+            disabled={!canUseQuestionActions || reveal.isComplete}
+          >
+            <FastForward aria-hidden className="h-4 w-4" />{" "}
+            {pendingAction === "reveal-all"
+              ? "Membuka semua ayat..."
+              : "Soal selesai dijawab"}
+          </Button>
         </div>
       ) : null}
       {assessmentOpen ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm font-medium">Evaluasi jawaban</p>
-          <AssessmentButtons onAssess={onAssess} />
+          <AssessmentForm onAssess={onAssess} />
         </div>
       ) : null}
     </div>
   );
 }
 
-function AssessmentButtons({
+/**
+ * Shown the instant a reveal click fires (pendingAction flips
+ * synchronously before the network call even starts), right where the
+ * incoming ayah will render - the real content still only ever arrives
+ * from the server (it cannot be shown before the server confirms it,
+ * without leaking the hidden answer to the client early), but this makes
+ * the click itself feel immediate instead of doing nothing until the
+ * round trip resolves.
+ */
+function RevealSkeletonRow() {
+  return (
+    <div className="grid animate-pulse gap-2" aria-hidden>
+      <div className="h-3 w-40 rounded bg-slate-200" />
+      <div className="ml-auto h-8 w-4/5 rounded bg-slate-200" />
+    </div>
+  );
+}
+
+/**
+ * Objective MHQ-style scoring instead of a subjective three-way choice:
+ * the user reports how many bel (bell rings) and tuntun (prompts) the
+ * recitation needed. Zero of both derives to CORRECT server-side (see
+ * lib/memorization/service.ts's deriveAssessment); anything else derives
+ * to MISSED and the question becomes eligible for evaluation practice -
+ * there is no separate "grade" choice to make here.
+ */
+function AssessmentForm({
   onAssess
 }: {
-  onAssess: (assessment: Assessment) => void;
+  onAssess: (belCount: number, tuntunCount: number) => void;
 }) {
+  const [belCount, setBelCount] = useState("0");
+  const [tuntunCount, setTuntunCount] = useState("0");
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  function submit() {
+    const parsedBel = Number.parseInt(belCount, 10);
+    const parsedTuntun = Number.parseInt(tuntunCount, 10);
+    if (!Number.isInteger(parsedBel) || parsedBel < 0) {
+      setValidationError("Jumlah bel harus bilangan bulat 0 atau lebih.");
+      return;
+    }
+    if (!Number.isInteger(parsedTuntun) || parsedTuntun < 0) {
+      setValidationError("Jumlah tuntun harus bilangan bulat 0 atau lebih.");
+      return;
+    }
+    setValidationError(null);
+    onAssess(parsedBel, parsedTuntun);
+  }
+
   return (
-    <div className="grid gap-2 sm:grid-cols-3">
-      <Button onClick={() => onAssess("CORRECT")}>
-        <CheckCircle2 aria-hidden className="h-4 w-4" /> Benar
-      </Button>
-      <Button variant="secondary" onClick={() => onAssess("PARTIAL")}>
-        Sebagian benar
-      </Button>
-      <Button variant="danger" onClick={() => onAssess("MISSED")}>
-        Belum ingat
+    <div className="grid gap-3">
+      {validationError ? (
+        <p role="alert" className="text-sm text-[var(--danger)]">
+          {validationError}
+        </p>
+      ) : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="grid gap-1 text-sm font-medium">
+          Jumlah bel
+          <input
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={belCount}
+            onChange={(event) => setBelCount(event.target.value)}
+            className="rounded-md border border-[var(--border)] px-3 py-2"
+          />
+        </label>
+        <label className="grid gap-1 text-sm font-medium">
+          Jumlah tuntun
+          <input
+            type="number"
+            min={0}
+            step={1}
+            inputMode="numeric"
+            value={tuntunCount}
+            onChange={(event) => setTuntunCount(event.target.value)}
+            className="rounded-md border border-[var(--border)] px-3 py-2"
+          />
+        </label>
+      </div>
+      <Button onClick={submit}>
+        <CheckCircle2 aria-hidden className="h-4 w-4" /> Simpan evaluasi
       </Button>
     </div>
   );

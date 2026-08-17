@@ -184,23 +184,55 @@ export function toRevealedAyah(verse: {
  * canonical order - i.e. the exact next ayah to reveal. revealedVersesJson
  * stores every ayah revealed so far so this only ever needs to fetch the
  * one new one, not re-fetch the whole accumulated prefix on every click.
+ *
+ * One round trip, not two: the anchor's globalOrder is looked up in a
+ * subquery evaluated by Postgres itself, not fetched separately first and
+ * then used in a second query from the client - each click on the reveal
+ * button pays this round-trip cost against Neon, so halving it here is a
+ * real, measurable latency win on the hottest path in the app.
  */
 export async function nthVerseFromAnchor(
   tx: Prisma.TransactionClient | typeof prisma,
   anchorVerseId: number,
   offset: number
 ): Promise<RevealedAyah> {
-  const anchor = await tx.quranVerse.findUniqueOrThrow({
-    where: { id: anchorVerseId },
-    select: { globalOrder: true }
-  });
-  const verse = await tx.quranVerse.findFirstOrThrow({
-    where: { globalOrder: { gte: anchor.globalOrder } },
-    orderBy: { globalOrder: "asc" },
-    skip: offset,
-    select: revealVerseSelect
-  });
-  return toRevealedAyah(verse);
+  const rows = await tx.$queryRaw<
+    {
+      verseKey: string;
+      textUthmani: string;
+      verseNumber: number;
+      juzNumber: number;
+      pageNumber: number;
+      globalOrder: number;
+      chapterNameTransliterated: string;
+      chapterNameArabic: string;
+    }[]
+  >(Prisma.sql`
+    SELECT v."verseKey", v."textUthmani", v."verseNumber", v."juzNumber",
+           v."pageNumber", v."globalOrder",
+           c."nameTransliterated" AS "chapterNameTransliterated",
+           c."nameArabic" AS "chapterNameArabic"
+    FROM "QuranVerse" v
+    JOIN "QuranChapter" c ON c.id = v."chapterId"
+    WHERE v."globalOrder" >= (
+      SELECT "globalOrder" FROM "QuranVerse" WHERE id = ${anchorVerseId}
+    )
+    ORDER BY v."globalOrder" ASC
+    OFFSET ${offset} LIMIT 1
+  `);
+  const verse = rows[0];
+  if (!verse) {
+    throw new Error(
+      `No verse found at offset ${offset} from anchor verse ${anchorVerseId} - Quran data integrity problem, not a user error.`
+    );
+  }
+  return {
+    verseKey: verse.verseKey,
+    text: verse.textUthmani,
+    surah: `${verse.chapterNameTransliterated} (${verse.chapterNameArabic})`,
+    juz: verse.juzNumber,
+    page: verse.pageNumber
+  };
 }
 
 /**

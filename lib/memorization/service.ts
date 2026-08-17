@@ -320,11 +320,31 @@ export async function requestQuestionHint(
   );
 }
 
+/**
+ * Objective MHQ-style self-assessment: the user reports how many bel
+ * (bell rings for a mistake) and tuntun (prompts needed) occurred, rather
+ * than picking a subjective Benar/Sebagian benar/Belum ingat label. The
+ * stored `assessment` enum is derived, not chosen - zero of both means a
+ * clean pass (CORRECT); any bel or tuntun means the question needs
+ * further practice (MISSED) - so the evaluation bank's existing
+ * `assessment IN (MISSED, PARTIAL)` eligibility filter keeps working
+ * unchanged. PARTIAL is never produced by new submissions; it remains a
+ * valid value only on historical rows created before this change.
+ */
+function deriveAssessment(
+  belCount: number,
+  tuntunCount: number
+): RecallAssessment {
+  return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
+}
+
 export async function submitAssessment(
   userId: string,
   questionId: string,
-  assessment: RecallAssessment
+  belCount: number,
+  tuntunCount: number
 ): Promise<AssessmentMutationResult> {
+  const assessment = deriveAssessment(belCount, tuntunCount);
   return measureServerTiming("assessment_request", async () =>
     retrySerialization(async () =>
       prisma.$transaction(
@@ -336,7 +356,9 @@ export async function submitAssessment(
               packageId: true,
               revealedAyahCount: true,
               revealTotalAyahCount: true,
-              assessment: { select: { assessment: true } }
+              assessment: {
+                select: { assessment: true, belCount: true, tuntunCount: true }
+              }
             }
           });
           if (!question) throw notFoundError();
@@ -348,24 +370,33 @@ export async function submitAssessment(
             throw revealIncompleteError();
           }
 
-          // Once assessed, immutable: a retry with the SAME value is a
-          // no-op idempotent replay (double-click, network retry), but a
-          // DIFFERENT value means the caller's own record of what it
-          // submitted disagrees with what is already saved - that is a
-          // conflict, not a silent overwrite of graded history.
+          // Once assessed, immutable: a retry with the SAME bel/tuntun
+          // pair is a no-op idempotent replay (double-click, network
+          // retry), but a DIFFERENT pair means the caller's own record of
+          // what it submitted disagrees with what is already saved - that
+          // is a conflict, not a silent overwrite of graded history.
           if (question.assessment) {
-            if (question.assessment.assessment === assessment) {
+            if (
+              question.assessment.belCount === belCount &&
+              question.assessment.tuntunCount === tuntunCount
+            ) {
               const packageCompleted = await completePackageIfReady(
                 tx,
                 question.packageId
               );
-              return { questionId, assessment, packageCompleted };
+              return {
+                questionId,
+                assessment: question.assessment.assessment,
+                belCount,
+                tuntunCount,
+                packageCompleted
+              };
             }
             throw alreadyAssessedError();
           }
 
           await tx.questionAssessment.create({
-            data: { userId, questionId, assessment },
+            data: { userId, questionId, assessment, belCount, tuntunCount },
             select: { id: true }
           });
           await tx.memorizationQuestion.update({
@@ -378,7 +409,13 @@ export async function submitAssessment(
             tx,
             question.packageId
           );
-          return { questionId, assessment, packageCompleted };
+          return {
+            questionId,
+            assessment,
+            belCount,
+            tuntunCount,
+            packageCompleted
+          };
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,

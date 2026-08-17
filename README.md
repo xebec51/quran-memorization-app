@@ -12,11 +12,11 @@ A production-oriented Quran memorization web app in Bahasa Indonesia. The primar
 - Each package contains exactly 4 questions.
 - Every package covers Juz 1-10, Juz 11-20, and Juz 21-30, plus one quota-safe wildcard.
 - A full cycle consumes all 604 Madani Mushaf pages exactly once as primary question pages.
-- Hints: Juz, Surah, progressive fragment extension, and next ayah.
+- Hints: Juz, Surah, and progressive fragment extension.
 - Question prompts always begin at the first word of the selected ayah while still varying the represented page area.
-- Progressive answer reveal (one ayah per click, through the whole next Mushaf page) and self-assessment: Benar, Sebagian benar, Belum ingat.
-- Evaluation practice mode: repeatable, page-hidden re-testing of any question last assessed Sebagian benar/Belum ingat, with its own reveal progress and attempt history.
-- User-specific history and analytics.
+- Progressive answer reveal (one ayah per click, through the whole next Mushaf page, or all at once via "Soal selesai dijawab") and objective MHQ-style self-assessment: enter bel/tuntun counts rather than picking Benar/Sebagian benar/Belum ingat directly - 0/0 is a clean pass, anything else marks the question for re-evaluation.
+- Evaluation practice mode: repeatable, page-hidden re-testing of any question needing re-evaluation, with its own reveal progress and attempt history.
+- User-specific history (expandable per question - the original prompt and the full revealed answer) and analytics.
 - Quran reader by surah, juz, and page.
 
 ## Stack

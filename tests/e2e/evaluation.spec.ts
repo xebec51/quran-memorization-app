@@ -31,21 +31,26 @@ async function assess(
   request: APIRequestContext,
   cookie: string,
   questionId: string,
-  assessment: "CORRECT" | "PARTIAL" | "MISSED"
+  belCount: number,
+  tuntunCount: number
 ) {
   await revealMainQuestionFully(request, cookie, questionId);
   const response = await request.post("/api/memorization/assessment", {
     headers: { cookie },
-    data: { questionId, assessment }
+    data: { questionId, belCount, tuntunCount }
   });
   expect(response.ok()).toBe(true);
 }
 
 /**
  * Registers a user, allocates one package, and assesses its 4 questions
- * as MISSED/MISSED/PARTIAL/CORRECT (each fully revealed first, per the
- * reveal-completeness gate) so the evaluation bank has a known,
- * non-trivial starting state to test against.
+ * - three with nonzero bel/tuntun (derives to MISSED) and one with 0/0
+ * (derives to CORRECT), each fully revealed first per the
+ * reveal-completeness gate - so the evaluation bank has a known,
+ * non-trivial starting state to test against. PARTIAL is no longer
+ * reachable from a new submission (see lib/memorization/service.ts's
+ * deriveAssessment) - `partial` stays empty and exists only so callers
+ * that used to read it don't need restructuring.
  */
 async function setupAssessedQuestions(
   request: APIRequestContext,
@@ -68,16 +73,16 @@ async function setupAssessedQuestions(
   };
   const [q1, q2, q3, q4] = pkg.questions;
 
-  await assess(request, cookie, q1.id, "MISSED");
-  await assess(request, cookie, q2.id, "MISSED");
-  await assess(request, cookie, q3.id, "PARTIAL");
-  await assess(request, cookie, q4.id, "CORRECT");
+  await assess(request, cookie, q1.id, 2, 1);
+  await assess(request, cookie, q2.id, 1, 0);
+  await assess(request, cookie, q3.id, 0, 1);
+  await assess(request, cookie, q4.id, 0, 0);
 
   return {
     cookie,
     questionIds: {
-      missed: [q1.id, q2.id],
-      partial: [q3.id],
+      missed: [q1.id, q2.id, q3.id],
+      partial: [] as string[],
       correct: [q4.id]
     }
   };
@@ -183,7 +188,7 @@ test("evaluation bank shows the immutable original fragment, never one extended 
     };
     for (const question of pkg.questions) {
       if (target) {
-        await assess(request, cookie, question.id, "CORRECT");
+        await assess(request, cookie, question.id, 0, 0);
         continue;
       }
       const hintResponse = await request.post("/api/memorization/hint", {
@@ -194,9 +199,9 @@ test("evaluation bank shows the immutable original fragment, never one extended 
         string | undefined;
       if (extended && extended !== question.fragmentText) {
         target = { id: question.id, original: question.fragmentText };
-        await assess(request, cookie, question.id, "MISSED");
+        await assess(request, cookie, question.id, 1, 0);
       } else {
-        await assess(request, cookie, question.id, "CORRECT");
+        await assess(request, cookie, question.id, 0, 0);
       }
     }
   }
@@ -533,7 +538,7 @@ test("bank and history pagination are stable across pages (no skipped or duplica
       questions: { id: string }[];
     };
     for (const question of pkg.questions) {
-      await assess(request, cookie, question.id, "MISSED");
+      await assess(request, cookie, question.id, 1, 0);
       missedIds.push(question.id);
     }
   }
