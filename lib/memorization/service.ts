@@ -701,25 +701,27 @@ async function completePackageIfReady(
   tx: Prisma.TransactionClient,
   packageId: string
 ) {
-  const [questionCount, assessedCount] = await Promise.all([
-    tx.memorizationQuestion.count({ where: { packageId } }),
-    tx.memorizationQuestion.count({
-      where: {
-        packageId,
-        assessment: { isNot: null }
-      }
-    })
-  ]);
+  // Single round trip instead of 3 (two counts + a separate package fetch):
+  // a package only ever has productConfig.questionsPerPackage (4) questions,
+  // so pulling their assessment presence inline is cheap, and this is the
+  // hot path (runs on every assessment submission, including idempotent
+  // repeats on an already-completed package).
+  const pkg = await tx.memorizationPackage.findUniqueOrThrow({
+    where: { id: packageId },
+    select: {
+      state: true,
+      cycleId: true,
+      packageNumber: true,
+      questions: { select: { assessment: { select: { id: true } } } }
+    }
+  });
+  const questionCount = pkg.questions.length;
+  const assessedCount = pkg.questions.filter((question) => question.assessment).length;
   if (
     questionCount !== productConfig.questionsPerPackage ||
     assessedCount !== questionCount
   )
     return false;
-
-  const pkg = await tx.memorizationPackage.findUniqueOrThrow({
-    where: { id: packageId },
-    select: { state: true, cycleId: true, packageNumber: true }
-  });
   if (pkg.state === "COMPLETED") return true;
 
   await tx.memorizationPackage.update({
