@@ -26,7 +26,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
     "db:snapshot": "tsx scripts/db-snapshot.ts",
-    "db:compare-snapshots": "tsx scripts/db-compare-snapshots.ts"
+    "db:compare-snapshots": "tsx scripts/db-compare-snapshots.ts",
+    "db:validate-test-url": "tsx scripts/validate-test-database-url.ts",
+    "auth:cleanup-rate-limits": "tsx scripts/cleanup-rate-limits.ts"
   },
   "repository": {
     "type": "git",
