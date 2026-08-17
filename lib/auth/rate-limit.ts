@@ -29,7 +29,9 @@ export async function recordAttempt(key: string) {
   const now = new Date();
   await prisma.$transaction(async (tx) => {
     const record = await tx.authRateLimit.findUnique({ where: { key } });
-    const elapsedMs = record ? now.getTime() - record.windowStart.getTime() : Infinity;
+    const elapsedMs = record
+      ? now.getTime() - record.windowStart.getTime()
+      : Infinity;
     if (!record || elapsedMs >= WINDOW_MS) {
       await tx.authRateLimit.upsert({
         where: { key },

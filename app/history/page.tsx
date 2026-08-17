@@ -31,7 +31,9 @@ export default async function HistoryPage({
   return (
     <div className="grid gap-4 pb-20">
       <h1 className="text-2xl font-semibold">Riwayat Latihan</h1>
-      {history.items.length === 0 ? <Card>Belum ada riwayat latihan.</Card> : null}
+      {history.items.length === 0 ? (
+        <Card>Belum ada riwayat latihan.</Card>
+      ) : null}
       {history.items.map((pkg) => (
         <Card key={pkg.id}>
           <div className="flex flex-wrap justify-between gap-2">
@@ -59,7 +61,9 @@ export default async function HistoryPage({
         </Card>
       ))}
       {history.nextCursor ? (
-        <Link href={`/history?cursor=${encodeURIComponent(history.nextCursor)}`}>
+        <Link
+          href={`/history?cursor=${encodeURIComponent(history.nextCursor)}`}
+        >
           <Button variant="secondary">Muat lebih banyak</Button>
         </Link>
       ) : null}

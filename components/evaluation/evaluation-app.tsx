@@ -1,7 +1,13 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlarmClock, CheckCircle2, History, ListChecks, Repeat } from "lucide-react";
+import {
+  AlarmClock,
+  CheckCircle2,
+  History,
+  ListChecks,
+  Repeat
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -42,8 +48,12 @@ async function api<T>(url: string, body?: unknown): Promise<T> {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body ?? {})
   });
-  const json = (await response.json()) as { data?: T; error?: { message: string } };
-  if (!response.ok || !json.data) throw new Error(json.error?.message ?? "Permintaan gagal.");
+  const json = (await response.json()) as {
+    data?: T;
+    error?: { message: string };
+  };
+  if (!response.ok || !json.data)
+    throw new Error(json.error?.message ?? "Permintaan gagal.");
   return json.data;
 }
 
@@ -98,7 +108,10 @@ export function EvaluationApp({
         belCount: parsedBel,
         tuntunCount: parsedTuntun
       });
-      setHistory((current) => ({ items: [attempt, ...current.items], nextCursor: current.nextCursor }));
+      setHistory((current) => ({
+        items: [attempt, ...current.items],
+        nextCursor: current.nextCursor
+      }));
       setSummary((current) => ({
         totalAttempts: current.totalAttempts + 1,
         totalBelCount: current.totalBelCount + attempt.belCount,
@@ -112,7 +125,11 @@ export function EvaluationApp({
       setBelCount("0");
       setTuntunCount("0");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal menyimpan percobaan evaluasi.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Gagal menyimpan percobaan evaluasi."
+      );
     } finally {
       submitLockRef.current = false;
       setPending(false);
@@ -130,7 +147,8 @@ export function EvaluationApp({
         data?: HistoryPage & { summary: Summary };
         error?: { message: string };
       };
-      if (!response.ok || !json.data) throw new Error(json.error?.message ?? "Gagal memuat riwayat.");
+      if (!response.ok || !json.data)
+        throw new Error(json.error?.message ?? "Gagal memuat riwayat.");
       setHistory((current) => ({
         items: [...current.items, ...json.data!.items],
         nextCursor: json.data!.nextCursor
@@ -147,25 +165,45 @@ export function EvaluationApp({
       <div>
         <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
         <p className="mt-1 text-[var(--muted)]">
-          Latih ulang soal yang belum ingat atau sebagian benar, tanpa mengganggu siklus 604 halaman.
+          Latih ulang soal yang belum ingat atau sebagian benar, tanpa
+          mengganggu siklus 604 halaman.
         </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <Metric icon={ListChecks} label="Total percobaan" value={summary.totalAttempts} />
-        <Metric icon={AlarmClock} label="Total bel" value={summary.totalBelCount} />
-        <Metric icon={Repeat} label="Total tuntun" value={summary.totalTuntunCount} />
-        <Metric icon={CheckCircle2} label="Benar" value={summary.resultCounts.CORRECT} />
+        <Metric
+          icon={ListChecks}
+          label="Total percobaan"
+          value={summary.totalAttempts}
+        />
+        <Metric
+          icon={AlarmClock}
+          label="Total bel"
+          value={summary.totalBelCount}
+        />
+        <Metric
+          icon={Repeat}
+          label="Total tuntun"
+          value={summary.totalTuntunCount}
+        />
+        <Metric
+          icon={CheckCircle2}
+          label="Benar"
+          value={summary.resultCounts.CORRECT}
+        />
       </div>
 
-      {error ? <Card className="text-sm text-[var(--danger)]">{error}</Card> : null}
+      {error ? (
+        <Card className="text-sm text-[var(--danger)]">{error}</Card>
+      ) : null}
 
       <Card>
         <h2 className="font-semibold">Bank Evaluasi ({bank.length})</h2>
         {bank.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini setelah dinilai
-            &quot;Sebagian benar&quot; atau &quot;Belum ingat&quot; pada latihan utama.
+            Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini
+            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum
+            ingat&quot; pada latihan utama.
           </p>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -187,11 +225,20 @@ export function EvaluationApp({
                         : "bg-amber-100 text-amber-800"
                     }`}
                   >
-                    {item.lastResult === "MISSED" ? "Belum ingat" : "Sebagian benar"}
+                    {item.lastResult === "MISSED"
+                      ? "Belum ingat"
+                      : "Sebagian benar"}
                   </span>
-                  <span className="text-xs text-[var(--muted)]">Halaman {item.primaryPageNumber}</span>
+                  <span className="text-xs text-[var(--muted)]">
+                    Halaman {item.primaryPageNumber}
+                  </span>
                 </div>
-                <p className="quran-text text-right text-xl" translate="no" lang="ar" dir="rtl">
+                <p
+                  className="quran-text text-right text-xl"
+                  translate="no"
+                  lang="ar"
+                  dir="rtl"
+                >
                   {item.fragmentText}
                 </p>
               </button>
@@ -204,9 +251,16 @@ export function EvaluationApp({
         <Card className="grid gap-4 tasmiq-panel-enter">
           <div>
             <h2 className="font-semibold">Catat hasil latihan</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">Halaman {selected.primaryPageNumber}</p>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Halaman {selected.primaryPageNumber}
+            </p>
           </div>
-          <p className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl" translate="no" lang="ar" dir="rtl">
+          <p
+            className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
+            translate="no"
+            lang="ar"
+            dir="rtl"
+          >
             {selected.fragmentText}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -239,10 +293,18 @@ export function EvaluationApp({
             <Button disabled={pending} onClick={() => submitAttempt("CORRECT")}>
               <CheckCircle2 aria-hidden className="h-4 w-4" /> Benar
             </Button>
-            <Button variant="secondary" disabled={pending} onClick={() => submitAttempt("PARTIAL")}>
+            <Button
+              variant="secondary"
+              disabled={pending}
+              onClick={() => submitAttempt("PARTIAL")}
+            >
               Sebagian benar
             </Button>
-            <Button variant="danger" disabled={pending} onClick={() => submitAttempt("MISSED")}>
+            <Button
+              variant="danger"
+              disabled={pending}
+              onClick={() => submitAttempt("MISSED")}
+            >
               Belum ingat
             </Button>
           </div>
@@ -255,13 +317,20 @@ export function EvaluationApp({
           <h2 className="font-semibold">Riwayat Evaluasi</h2>
         </div>
         {history.items.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--muted)]">Belum ada percobaan evaluasi.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Belum ada percobaan evaluasi.
+          </p>
         ) : (
           <div className="mt-3 grid gap-2">
             {history.items.map((attempt) => (
-              <div key={attempt.id} className="rounded-md bg-slate-50 p-3 text-sm">
+              <div
+                key={attempt.id}
+                className="rounded-md bg-slate-50 p-3 text-sm"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{resultLabel(attempt.result)}</span>
+                  <span className="font-medium">
+                    {resultLabel(attempt.result)}
+                  </span>
                   <span className="text-xs text-[var(--muted)]">
                     {new Date(attempt.createdAt).toLocaleString("id-ID")}
                   </span>
@@ -274,7 +343,12 @@ export function EvaluationApp({
           </div>
         )}
         {history.nextCursor ? (
-          <Button variant="secondary" className="mt-3" disabled={loadingMore} onClick={loadMoreHistory}>
+          <Button
+            variant="secondary"
+            className="mt-3"
+            disabled={loadingMore}
+            onClick={loadMoreHistory}
+          >
             {loadingMore ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}

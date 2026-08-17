@@ -15,7 +15,11 @@ export async function POST(request: Request) {
       const user = await requireUser();
       const input = schema.parse(await request.json());
       return jsonOk(
-        await revealNextAyah(user.id, input.questionId, input.expectedRevealedCount)
+        await revealNextAyah(
+          user.id,
+          input.questionId,
+          input.expectedRevealedCount
+        )
       );
     } catch (error) {
       return routeError(error);

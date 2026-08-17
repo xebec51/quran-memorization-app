@@ -34,7 +34,9 @@ const bankQuestionSelect = {
  * QuestionAssessment, so the bank membership only changes when the user
  * re-does the *main* question (not an evaluation attempt).
  */
-export async function getEvaluationBank(userId: string): Promise<EvaluationBankItem[]> {
+export async function getEvaluationBank(
+  userId: string
+): Promise<EvaluationBankItem[]> {
   return measureServerTiming("evaluation_bank", async () => {
     const questions = await prisma.memorizationQuestion.findMany({
       where: {
@@ -50,9 +52,12 @@ export async function getEvaluationBank(userId: string): Promise<EvaluationBankI
         fragmentText: question.visibleFragmentText,
         lastResult: question.assessment!.assessment,
         primaryPageNumber: question.primaryPageNumber,
-        lastAttemptAt: question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
+        lastAttemptAt:
+          question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
       }))
-      .sort((a, b) => RESULT_PRIORITY[a.lastResult] - RESULT_PRIORITY[b.lastResult]);
+      .sort(
+        (a, b) => RESULT_PRIORITY[a.lastResult] - RESULT_PRIORITY[b.lastResult]
+      );
   });
 }
 
@@ -85,7 +90,11 @@ export async function submitEvaluationAttempt(
   });
 }
 
-export async function getEvaluationHistory(userId: string, cursor: string | null, limit: number) {
+export async function getEvaluationHistory(
+  userId: string,
+  cursor: string | null,
+  limit: number
+) {
   return measureServerTiming("evaluation_history", async () => {
     const attempts = await prisma.evaluationAttempt.findMany({
       where: { userId },
@@ -111,7 +120,9 @@ export async function getEvaluationHistory(userId: string, cursor: string | null
   });
 }
 
-export async function getEvaluationSummary(userId: string): Promise<EvaluationHistorySummary> {
+export async function getEvaluationSummary(
+  userId: string
+): Promise<EvaluationHistorySummary> {
   return measureServerTiming("evaluation_summary", async () => {
     const [totals, resultGroups] = await Promise.all([
       prisma.evaluationAttempt.aggregate({
@@ -130,7 +141,8 @@ export async function getEvaluationSummary(userId: string): Promise<EvaluationHi
       PARTIAL: 0,
       MISSED: 0
     };
-    for (const group of resultGroups) resultCounts[group.result] = group._count.result;
+    for (const group of resultGroups)
+      resultCounts[group.result] = group._count.result;
     return {
       totalAttempts: totals._count._all,
       totalBelCount: totals._sum.belCount ?? 0,

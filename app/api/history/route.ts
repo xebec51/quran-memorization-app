@@ -18,7 +18,9 @@ export async function GET(request: Request) {
         cursor: searchParams.get("cursor"),
         limit: searchParams.get("limit") ?? undefined
       });
-      return jsonOk(await getPackageHistory(user.id, input.cursor, input.limit));
+      return jsonOk(
+        await getPackageHistory(user.id, input.cursor, input.limit)
+      );
     } catch (error) {
       return routeError(error);
     }

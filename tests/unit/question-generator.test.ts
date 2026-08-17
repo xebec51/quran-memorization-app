@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { generateQuestionSource } from "@/lib/memorization/question/generator";
 import { projectExtensionHint } from "@/lib/memorization/hint/service";
 import { SeededRandomSource } from "@/lib/memorization/random";
-import type { PagePositionBucket, QuranWordRef } from "@/lib/memorization/types";
+import type {
+  PagePositionBucket,
+  QuranWordRef
+} from "@/lib/memorization/types";
 
 const words = makeWords([
   { verseId: 10, verseKey: "fixture:1", wordCount: 12 },
@@ -19,7 +22,9 @@ describe("question generator", () => {
       preferredBucket: "MIDDLE",
       rng: new SeededRandomSource("question")
     });
-    const anchor = words.find((word) => word.id === question.fragmentStartWordId);
+    const anchor = words.find(
+      (word) => word.id === question.fragmentStartWordId
+    );
 
     expect(anchor?.position).toBe(1);
     expect(anchor?.verseId).toBe(question.anchorVerseId);
@@ -27,7 +32,11 @@ describe("question generator", () => {
   });
 
   it("never starts from a mid-ayah word across page-area buckets", () => {
-    for (const bucket of ["START", "MIDDLE", "END"] satisfies PagePositionBucket[]) {
+    for (const bucket of [
+      "START",
+      "MIDDLE",
+      "END"
+    ] satisfies PagePositionBucket[]) {
       for (let index = 0; index < 10; index += 1) {
         const question = generateQuestionSource({
           primaryPageNumber: 1,
@@ -36,7 +45,9 @@ describe("question generator", () => {
           preferredBucket: bucket,
           rng: new SeededRandomSource(`${bucket}-${index}`)
         });
-        const anchor = words.find((word) => word.id === question.fragmentStartWordId);
+        const anchor = words.find(
+          (word) => word.id === question.fragmentStartWordId
+        );
         expect(anchor?.position).toBe(1);
       }
     }
@@ -54,8 +65,12 @@ describe("question generator", () => {
       })
     );
 
-    expect(selected.map((question) => question.pagePositionBucket)).toEqual(buckets);
-    expect(new Set(selected.map((question) => question.anchorVerseId)).size).toBeGreaterThan(1);
+    expect(selected.map((question) => question.pagePositionBucket)).toEqual(
+      buckets
+    );
+    expect(
+      new Set(selected.map((question) => question.anchorVerseId)).size
+    ).toBeGreaterThan(1);
   });
 
   it("keeps EXTEND_FRAGMENT as a contiguous continuation from the same ayah beginning", () => {
@@ -66,19 +81,23 @@ describe("question generator", () => {
       preferredBucket: "START",
       rng: new SeededRandomSource("extension")
     });
-    const verseWords = words.filter((word) => word.verseId === question.anchorVerseId);
+    const verseWords = words.filter(
+      (word) => word.verseId === question.anchorVerseId
+    );
     const extended = verseWords.slice(0, question.initialWordCount + 2);
 
-    expect(projectExtensionHint({ ordinal: 1, visibleWords: extended }).text).toBe(
-      extended.map((word) => word.textUthmani).join(" ")
-    );
+    expect(
+      projectExtensionHint({ ordinal: 1, visibleWords: extended }).text
+    ).toBe(extended.map((word) => word.textUthmani).join(" "));
     expect(extended.map((word) => word.position)).toEqual(
       Array.from({ length: extended.length }, (_, index) => index + 1)
     );
   });
 
   it("handles short ayat safely without combining unrelated text", () => {
-    const shortWords = makeWords([{ verseId: 20, verseKey: "fixture:short", wordCount: 3 }]);
+    const shortWords = makeWords([
+      { verseId: 20, verseKey: "fixture:short", wordCount: 3 }
+    ]);
     const question = generateQuestionSource({
       primaryPageNumber: 1,
       assignedBand: "A",
@@ -90,7 +109,11 @@ describe("question generator", () => {
     expect(question.initialWordCount).toBeGreaterThanOrEqual(1);
     expect(question.initialWordCount).toBeLessThanOrEqual(3);
     expect(question.fragmentStartWordId).toBe(shortWords[0].id);
-    expect(question.fragmentText.split(" ")).toEqual(shortWords.slice(0, question.initialWordCount).map((word) => word.textUthmani));
+    expect(question.fragmentText.split(" ")).toEqual(
+      shortWords
+        .slice(0, question.initialWordCount)
+        .map((word) => word.textUthmani)
+    );
   });
 
   it("rejects pages with insufficient usable words", () => {
@@ -106,7 +129,9 @@ describe("question generator", () => {
   });
 });
 
-function makeWords(verses: { verseId: number; verseKey: string; wordCount: number }[]): QuranWordRef[] {
+function makeWords(
+  verses: { verseId: number; verseKey: string; wordCount: number }[]
+): QuranWordRef[] {
   let id = 1;
   let globalOrder = 1;
   return verses.flatMap((verse, verseIndex) =>

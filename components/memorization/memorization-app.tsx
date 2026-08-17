@@ -77,7 +77,9 @@ type AssessmentMutation = {
 
 function firstActiveIndex(pkg: PackageDto) {
   if (pkg.activeQuestionId) {
-    const index = pkg.questions.findIndex((item) => item.id === pkg.activeQuestionId);
+    const index = pkg.questions.findIndex(
+      (item) => item.id === pkg.activeQuestionId
+    );
     if (index >= 0) return index;
   }
   return 0;
@@ -237,7 +239,9 @@ export function MemorizationApp({
           : "";
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal membuka ayat berikutnya.");
+      setError(
+        err instanceof Error ? err.message : "Gagal membuka ayat berikutnya."
+      );
     } finally {
       endAction();
     }
@@ -270,7 +274,9 @@ export function MemorizationApp({
       activeQuestionId: nextActiveId
     });
     if (!nextPackageCompleted) {
-      const nextIndex = nextQuestions.findIndex((item) => item.id === nextActiveId);
+      const nextIndex = nextQuestions.findIndex(
+        (item) => item.id === nextActiveId
+      );
       if (nextIndex >= 0) setActiveIndex(nextIndex);
     }
 
@@ -458,7 +464,9 @@ function QuestionPanel({
   const assessmentOpen = assessmentRequested || reveal.isComplete;
   const revealButtonLabel = useMemo(() => {
     if (pendingAction === "reveal") return "Membuka...";
-    return reveal.revealedAyahCount === 0 ? "Lihat Ayat Pertama" : "Lihat Ayat Berikutnya";
+    return reveal.revealedAyahCount === 0
+      ? "Lihat Ayat Pertama"
+      : "Lihat Ayat Berikutnya";
   }, [pendingAction, reveal.revealedAyahCount]);
 
   return (
@@ -574,7 +582,8 @@ function QuestionPanel({
           {reveal.verses.map((verse) => (
             <div key={verse.verseKey} className="grid gap-1">
               <p className="text-xs text-[var(--muted)]">
-                {verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman {verse.page}
+                {verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman{" "}
+                {verse.page}
               </p>
               <p
                 className="quran-text text-right text-3xl"

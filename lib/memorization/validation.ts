@@ -31,7 +31,12 @@ export type QuestionAnchorValidationResult = {
  */
 export async function validateQuestionAnchors(): Promise<QuestionAnchorValidationResult> {
   const rows = await prisma.$queryRaw<
-    { questionId: string; primaryPageNumber: number; anchorVerseKey: string; position: number }[]
+    {
+      questionId: string;
+      primaryPageNumber: number;
+      anchorVerseKey: string;
+      position: number;
+    }[]
   >`
     SELECT q.id AS "questionId", q."primaryPageNumber", q."anchorVerseKey", w.position
     FROM "MemorizationQuestion" q

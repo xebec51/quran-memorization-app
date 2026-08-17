@@ -13,9 +13,16 @@ export default async function MemorizationPage() {
   if (!user) {
     return (
       <Card>
-        <h1 className="text-2xl font-semibold">Masuk ke {productConfig.name}</h1>
-        <p className="mt-2 text-[var(--muted)]">Masuk untuk menyimpan siklus, riwayat, petunjuk, dan analitik hafalan musabaqah.</p>
-        <Link href="/login"><Button className="mt-4">Masuk</Button></Link>
+        <h1 className="text-2xl font-semibold">
+          Masuk ke {productConfig.name}
+        </h1>
+        <p className="mt-2 text-[var(--muted)]">
+          Masuk untuk menyimpan siklus, riwayat, petunjuk, dan analitik hafalan
+          musabaqah.
+        </p>
+        <Link href="/login">
+          <Button className="mt-4">Masuk</Button>
+        </Link>
       </Card>
     );
   }

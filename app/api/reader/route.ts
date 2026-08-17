@@ -47,7 +47,8 @@ const getCachedReaderData = unstable_cache(
       mode === "page"
         ? await versesForPage(value)
         : await prisma.quranVerse.findMany({
-            where: mode === "surah" ? { chapterId: value } : { juzNumber: value },
+            where:
+              mode === "surah" ? { chapterId: value } : { juzNumber: value },
             orderBy: { globalOrder: "asc" },
             select: readerVerseSelect
           });

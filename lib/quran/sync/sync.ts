@@ -64,20 +64,30 @@ export async function syncQuranData(provider: QuranProvider) {
 
   try {
     const chapters = await withRetry(() => provider.getChapters());
-    const verseById = new Map<number, Awaited<ReturnType<QuranProvider["getVersesByPage"]>>[number]>();
+    const verseById = new Map<
+      number,
+      Awaited<ReturnType<QuranProvider["getVersesByPage"]>>[number]
+    >();
     const wordById = new Map<
       number,
-      Awaited<ReturnType<QuranProvider["getVersesByPage"]>>[number]["words"][number] & {
+      Awaited<
+        ReturnType<QuranProvider["getVersesByPage"]>
+      >[number]["words"][number] & {
         verseId: number;
         chapterId: number;
         verseNumber: number;
         juzNumber: number;
       }
     >();
-    const pageWords = new Map<number, { juzNumber: number; globalOrder: number }[]>();
+    const pageWords = new Map<
+      number,
+      { juzNumber: number; globalOrder: number }[]
+    >();
 
     for (let pageNumber = 1; pageNumber <= 604; pageNumber += 1) {
-      const verses = await withRetry(() => provider.getVersesByPage(pageNumber));
+      const verses = await withRetry(() =>
+        provider.getVersesByPage(pageNumber)
+      );
       for (const verse of verses) {
         verseById.set(verse.id, verse);
         for (const word of verse.words) {
@@ -101,7 +111,10 @@ export async function syncQuranData(provider: QuranProvider) {
     // Sort by the word's true canonical position instead.
     const verses = [...verseById.values()].sort((a, b) => a.id - b.id);
     const words = [...wordById.values()].sort(
-      (a, b) => a.chapterId - b.chapterId || a.verseNumber - b.verseNumber || a.position - b.position
+      (a, b) =>
+        a.chapterId - b.chapterId ||
+        a.verseNumber - b.verseNumber ||
+        a.position - b.position
     );
     for (const [index, word] of words.entries()) {
       const list = pageWords.get(word.pageNumber) ?? [];
@@ -230,13 +243,19 @@ function preflightValidate(payload: {
 }) {
   const errors: string[] = [];
   if (payload.chapterRows.length !== 114) {
-    errors.push(`Expected 114 chapters from provider, got ${payload.chapterRows.length}`);
+    errors.push(
+      `Expected 114 chapters from provider, got ${payload.chapterRows.length}`
+    );
   }
   if (payload.pageRows.length !== 604) {
-    errors.push(`Expected 604 pages from provider, got ${payload.pageRows.length}`);
+    errors.push(
+      `Expected 604 pages from provider, got ${payload.pageRows.length}`
+    );
   }
   if (payload.verseRows.length !== 6236) {
-    errors.push(`Expected 6236 verses from provider, got ${payload.verseRows.length}`);
+    errors.push(
+      `Expected 6236 verses from provider, got ${payload.verseRows.length}`
+    );
   }
   if (payload.wordRows.length === 0) {
     errors.push("Provider returned zero words");
@@ -244,21 +263,31 @@ function preflightValidate(payload: {
   const duplicateVerseKeys = new Set<string>();
   const seenVerseKeys = new Set<string>();
   for (const verse of payload.verseRows) {
-    if (seenVerseKeys.has(verse.verseKey)) duplicateVerseKeys.add(verse.verseKey);
+    if (seenVerseKeys.has(verse.verseKey))
+      duplicateVerseKeys.add(verse.verseKey);
     seenVerseKeys.add(verse.verseKey);
   }
   if (duplicateVerseKeys.size > 0) {
-    errors.push(`Provider payload contains duplicate verse keys: ${[...duplicateVerseKeys].slice(0, 5).join(", ")}`);
+    errors.push(
+      `Provider payload contains duplicate verse keys: ${[...duplicateVerseKeys].slice(0, 5).join(", ")}`
+    );
   }
   const verseIds = new Set(payload.verseRows.map((verse) => verse.id));
-  const orphanWords = payload.wordRows.filter((word) => !verseIds.has(word.verseId));
+  const orphanWords = payload.wordRows.filter(
+    (word) => !verseIds.has(word.verseId)
+  );
   if (orphanWords.length > 0) {
-    errors.push(`Provider payload contains ${orphanWords.length} word(s) referencing an unknown verse id`);
+    errors.push(
+      `Provider payload contains ${orphanWords.length} word(s) referencing an unknown verse id`
+    );
   }
   return errors;
 }
 
-async function upsertChapters(tx: Prisma.TransactionClient, rows: readonly ChapterRow[]) {
+async function upsertChapters(
+  tx: Prisma.TransactionClient,
+  rows: readonly ChapterRow[]
+) {
   for (const batch of chunks(rows, 500)) {
     const values = Prisma.join(
       batch.map(
@@ -281,7 +310,10 @@ async function upsertChapters(tx: Prisma.TransactionClient, rows: readonly Chapt
   }
 }
 
-async function upsertPages(tx: Prisma.TransactionClient, rows: readonly PageRow[]) {
+async function upsertPages(
+  tx: Prisma.TransactionClient,
+  rows: readonly PageRow[]
+) {
   for (const batch of chunks(rows, 500)) {
     const values = Prisma.join(
       batch.map(
@@ -301,7 +333,10 @@ async function upsertPages(tx: Prisma.TransactionClient, rows: readonly PageRow[
   }
 }
 
-async function upsertVerses(tx: Prisma.TransactionClient, rows: readonly VerseRow[]) {
+async function upsertVerses(
+  tx: Prisma.TransactionClient,
+  rows: readonly VerseRow[]
+) {
   for (const batch of chunks(rows, 1000)) {
     const values = Prisma.join(
       batch.map(
@@ -325,7 +360,10 @@ async function upsertVerses(tx: Prisma.TransactionClient, rows: readonly VerseRo
   }
 }
 
-async function upsertWords(tx: Prisma.TransactionClient, rows: readonly WordRow[]) {
+async function upsertWords(
+  tx: Prisma.TransactionClient,
+  rows: readonly WordRow[]
+) {
   for (const batch of chunks(rows, 1500)) {
     const values = Prisma.join(
       batch.map(

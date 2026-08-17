@@ -18,7 +18,9 @@ async function main() {
 
 main()
   .catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.message : "Seed failed"}\n`);
+    process.stderr.write(
+      `${error instanceof Error ? error.message : "Seed failed"}\n`
+    );
     process.exit(1);
   })
   .finally(async () => {

@@ -1,0 +1,9 @@
+node_modules
+.next
+generated
+graphify-out
+playwright-report
+test-results
+tests/fixtures/quran-dataset.json
+package-lock.json
+tsconfig.tsbuildinfo

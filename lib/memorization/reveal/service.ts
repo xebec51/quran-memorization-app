@@ -2,7 +2,11 @@ import "server-only";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { measureServerTiming } from "@/lib/performance/timing";
-import { DomainError, alreadyAssessedError, notFoundError } from "@/lib/memorization/errors";
+import {
+  DomainError,
+  alreadyAssessedError,
+  notFoundError
+} from "@/lib/memorization/errors";
 import type { RevealMutationResult, RevealedAyah } from "../types";
 
 /**
@@ -27,7 +31,9 @@ export async function computeRevealBoundary(
     select: { verseId: true }
   });
   if (!lastWordOnPage) {
-    throw new Error(`No words found for page ${primaryPageNumber}; run quran:sync first.`);
+    throw new Error(
+      `No words found for page ${primaryPageNumber}; run quran:sync first.`
+    );
   }
 
   const [anchor, boundary] = await Promise.all([
@@ -48,7 +54,9 @@ export async function computeRevealBoundary(
   }
 
   const totalAyahCount = await tx.quranVerse.count({
-    where: { globalOrder: { gte: anchor.globalOrder, lte: boundary.globalOrder } }
+    where: {
+      globalOrder: { gte: anchor.globalOrder, lte: boundary.globalOrder }
+    }
   });
 
   return { boundaryVerseId: lastWordOnPage.verseId, totalAyahCount };
@@ -120,74 +128,85 @@ export async function revealNextAyah(
   expectedRevealedCount: number
 ): Promise<RevealMutationResult> {
   return measureServerTiming("reveal_next_ayah", () =>
-    prisma.$transaction(
-      async (tx) => {
-        const question = await tx.memorizationQuestion.findFirst({
-          where: { id: questionId, userId },
-          select: {
-            id: true,
-            state: true,
-            anchorVerseId: true,
-            revealedAyahCount: true,
-            revealTotalAyahCount: true,
-            revealedVersesJson: true,
-            answerRevealedAt: true
-          }
-        });
-        if (!question) throw notFoundError();
-        if (question.state === "ASSESSED") throw alreadyAssessedError();
-
-        let nextCount = question.revealedAyahCount;
-        let verses = question.revealedVersesJson as unknown as RevealedAyah[];
-        const canAdvance =
-          question.revealedAyahCount === expectedRevealedCount &&
-          question.revealedAyahCount < question.revealTotalAyahCount;
-
-        if (canAdvance) {
-          const newVerse = await nthVerseFromAnchor(
-            tx,
-            question.anchorVerseId,
-            question.revealedAyahCount
-          );
-          nextCount = question.revealedAyahCount + 1;
-          verses = [...verses, newVerse];
-          await tx.memorizationQuestion.update({
-            where: { id: question.id },
-            data: {
-              revealedAyahCount: nextCount,
-              revealedVersesJson: verses as unknown as Prisma.InputJsonValue,
-              ...(question.answerRevealedAt
-                ? {}
-                : { answerRevealedAt: new Date(), state: "ANSWER_REVEALED" as const })
-            },
-            select: { id: true }
+    prisma
+      .$transaction(
+        async (tx) => {
+          const question = await tx.memorizationQuestion.findFirst({
+            where: { id: questionId, userId },
+            select: {
+              id: true,
+              state: true,
+              anchorVerseId: true,
+              revealedAyahCount: true,
+              revealTotalAyahCount: true,
+              revealedVersesJson: true,
+              answerRevealedAt: true
+            }
           });
-        }
+          if (!question) throw notFoundError();
+          if (question.state === "ASSESSED") throw alreadyAssessedError();
 
-        return {
-          questionId: question.id,
-          revealedAyahCount: nextCount,
-          totalAyahCount: question.revealTotalAyahCount,
-          isComplete: nextCount >= question.revealTotalAyahCount,
-          verses
-        };
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 15_000 }
-    ).catch((error) => {
-      if (error instanceof DomainError) throw error;
-      if (isRetryableConflict(error)) {
-        // A genuinely concurrent request (two tabs) lost the race; the
-        // caller's optimistic-concurrency retry (same expectedRevealedCount)
-        // will simply see the winner's state and no-op. Surface as a normal
-        // reveal-state response instead of a 500 by re-reading current state.
-        return currentRevealState(userId, questionId);
-      }
-      throw error;
-    })
+          let nextCount = question.revealedAyahCount;
+          let verses = question.revealedVersesJson as unknown as RevealedAyah[];
+          const canAdvance =
+            question.revealedAyahCount === expectedRevealedCount &&
+            question.revealedAyahCount < question.revealTotalAyahCount;
+
+          if (canAdvance) {
+            const newVerse = await nthVerseFromAnchor(
+              tx,
+              question.anchorVerseId,
+              question.revealedAyahCount
+            );
+            nextCount = question.revealedAyahCount + 1;
+            verses = [...verses, newVerse];
+            await tx.memorizationQuestion.update({
+              where: { id: question.id },
+              data: {
+                revealedAyahCount: nextCount,
+                revealedVersesJson: verses as unknown as Prisma.InputJsonValue,
+                ...(question.answerRevealedAt
+                  ? {}
+                  : {
+                      answerRevealedAt: new Date(),
+                      state: "ANSWER_REVEALED" as const
+                    })
+              },
+              select: { id: true }
+            });
+          }
+
+          return {
+            questionId: question.id,
+            revealedAyahCount: nextCount,
+            totalAyahCount: question.revealTotalAyahCount,
+            isComplete: nextCount >= question.revealTotalAyahCount,
+            verses
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 15_000
+        }
+      )
+      .catch((error) => {
+        if (error instanceof DomainError) throw error;
+        if (isRetryableConflict(error)) {
+          // A genuinely concurrent request (two tabs) lost the race; the
+          // caller's optimistic-concurrency retry (same expectedRevealedCount)
+          // will simply see the winner's state and no-op. Surface as a normal
+          // reveal-state response instead of a 500 by re-reading current state.
+          return currentRevealState(userId, questionId);
+        }
+        throw error;
+      })
   );
 }
 
-async function currentRevealState(userId: string, questionId: string): Promise<RevealMutationResult> {
+async function currentRevealState(
+  userId: string,
+  questionId: string
+): Promise<RevealMutationResult> {
   const question = await prisma.memorizationQuestion.findFirst({
     where: { id: questionId, userId },
     select: {
@@ -213,7 +232,10 @@ function isRetryableConflict(error: unknown) {
   }
   if (error && typeof error === "object") {
     const maybe = error as { cause?: { originalCode?: string }; name?: string };
-    return maybe.cause?.originalCode === "40001" || maybe.name === "DriverAdapterError";
+    return (
+      maybe.cause?.originalCode === "40001" ||
+      maybe.name === "DriverAdapterError"
+    );
   }
   return false;
 }

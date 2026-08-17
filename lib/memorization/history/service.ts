@@ -22,7 +22,11 @@ const packageHistorySelect = {
   }
 } satisfies Prisma.MemorizationPackageSelect;
 
-export async function getPackageHistory(userId: string, cursor: string | null, limit: number) {
+export async function getPackageHistory(
+  userId: string,
+  cursor: string | null,
+  limit: number
+) {
   return measureServerTiming("package_history", async () => {
     const packages = await prisma.memorizationPackage.findMany({
       where: { userId },

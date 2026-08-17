@@ -293,7 +293,9 @@ export async function requestQuestionHint(
             select: { verseKey: true, textUthmani: true }
           });
           if (!nextVerse)
-            throw hintLimitError("Tidak ada ayat berikutnya untuk ditampilkan.");
+            throw hintLimitError(
+              "Tidak ada ayat berikutnya untuk ditampilkan."
+            );
           const payload = projectNextVerseHint({
             ordinal,
             verseKey: nextVerse.verseKey,
@@ -457,33 +459,39 @@ async function allocatePackage(
 
     const boundaries = await Promise.all(
       sources.map((source) =>
-        computeRevealBoundary(tx, source.anchorVerseId, source.primaryPageNumber)
+        computeRevealBoundary(
+          tx,
+          source.anchorVerseId,
+          source.primaryPageNumber
+        )
       )
     );
 
-    const questionRows: GeneratedQuestionRow[] = sources.map((source, index) => ({
-      id: randomUUID(),
-      userId,
-      cycleId: cycle.id,
-      packageId: pkg.id,
-      orderInPackage: index + 1,
-      primaryPageNumber: source.primaryPageNumber,
-      juzNumber: source.juzNumber,
-      juzBand: source.juzBand,
-      surahId: source.surahId,
-      anchorVerseId: source.anchorVerseId,
-      anchorVerseKey: source.anchorVerseKey,
-      pagePositionBucket: source.pagePositionBucket,
-      fragmentStartWordId: source.fragmentStartWordId,
-      initialWordCount: source.initialWordCount,
-      visibleWordCount: source.visibleWordCount,
-      visibleFragmentText: source.fragmentText,
-      maxExtensionCount: productConfig.extensionLimit,
-      maxNextVerseCount: productConfig.nextVerseLimit,
-      revealBoundaryVerseId: boundaries[index].boundaryVerseId,
-      revealTotalAyahCount: boundaries[index].totalAyahCount,
-      revealedVersesJson: [] as unknown as Prisma.InputJsonValue
-    }));
+    const questionRows: GeneratedQuestionRow[] = sources.map(
+      (source, index) => ({
+        id: randomUUID(),
+        userId,
+        cycleId: cycle.id,
+        packageId: pkg.id,
+        orderInPackage: index + 1,
+        primaryPageNumber: source.primaryPageNumber,
+        juzNumber: source.juzNumber,
+        juzBand: source.juzBand,
+        surahId: source.surahId,
+        anchorVerseId: source.anchorVerseId,
+        anchorVerseKey: source.anchorVerseKey,
+        pagePositionBucket: source.pagePositionBucket,
+        fragmentStartWordId: source.fragmentStartWordId,
+        initialWordCount: source.initialWordCount,
+        visibleWordCount: source.visibleWordCount,
+        visibleFragmentText: source.fragmentText,
+        maxExtensionCount: productConfig.extensionLimit,
+        maxNextVerseCount: productConfig.nextVerseLimit,
+        revealBoundaryVerseId: boundaries[index].boundaryVerseId,
+        revealTotalAyahCount: boundaries[index].totalAyahCount,
+        revealedVersesJson: [] as unknown as Prisma.InputJsonValue
+      })
+    );
     await tx.memorizationQuestion.createMany({ data: questionRows });
 
     await tx.memorizationCycle.update({
@@ -524,11 +532,14 @@ function packageDtoFromRecord(pkg: PackageForDto) {
       pagesTested: pkg.cycle._count.questions
     },
     questions,
-    activeQuestionId: questions.find((question) => question.assessment === null)?.id ?? null
+    activeQuestionId:
+      questions.find((question) => question.assessment === null)?.id ?? null
   };
 }
 
-function publicQuestionFromRecord(question: QuestionForPublicDto): PublicQuestion {
+function publicQuestionFromRecord(
+  question: QuestionForPublicDto
+): PublicQuestion {
   const counts = hintCountsFromEvents(question.hintEvents);
   const revealedAyahCount = question.revealedAyahCount;
   const totalAyahCount = question.revealTotalAyahCount;
@@ -552,7 +563,9 @@ function publicQuestionFromRecord(question: QuestionForPublicDto): PublicQuestio
   };
 }
 
-function publicQuestionFromGeneratedRow(question: GeneratedQuestionRow): PublicQuestion {
+function publicQuestionFromGeneratedRow(
+  question: GeneratedQuestionRow
+): PublicQuestion {
   return {
     id: question.id,
     order: question.orderInPackage,
@@ -716,7 +729,9 @@ async function completePackageIfReady(
     }
   });
   const questionCount = pkg.questions.length;
-  const assessedCount = pkg.questions.filter((question) => question.assessment).length;
+  const assessedCount = pkg.questions.filter(
+    (question) => question.assessment
+  ).length;
   if (
     questionCount !== productConfig.questionsPerPackage ||
     assessedCount !== questionCount

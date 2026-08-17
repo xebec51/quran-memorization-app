@@ -1,6 +1,9 @@
 import type { JuzBand } from "../types";
 
-export const JUZ_BANDS: Record<JuzBand, { min: number; max: number; label: string }> = {
+export const JUZ_BANDS: Record<
+  JuzBand,
+  { min: number; max: number; label: string }
+> = {
   A: { min: 1, max: 10, label: "Juz 1-10" },
   B: { min: 11, max: 20, label: "Juz 11-20" },
   C: { min: 21, max: 30, label: "Juz 21-30" }

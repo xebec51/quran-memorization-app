@@ -54,7 +54,9 @@ select {
 
 .quran-text {
   direction: rtl;
-  font-family: var(--font-quran), "Amiri Quran", "Scheherazade New", "Noto Naskh Arabic", serif;
+  font-family:
+    var(--font-quran), "Amiri Quran", "Scheherazade New", "Noto Naskh Arabic",
+    serif;
   line-height: 2.25;
   letter-spacing: 0;
 }

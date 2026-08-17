@@ -12,7 +12,10 @@ export default async function RegisterPage({
     <div className="pb-20">
       <AuthForm mode="register" error={authFormErrorMessage(error)} />
       <p className="mt-4 text-center text-sm text-[var(--muted)]">
-        Sudah punya akun? <Link className="font-medium text-[var(--primary)]" href="/login">Masuk</Link>
+        Sudah punya akun?{" "}
+        <Link className="font-medium text-[var(--primary)]" href="/login">
+          Masuk
+        </Link>
       </p>
     </div>
   );

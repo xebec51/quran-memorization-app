@@ -17,7 +17,9 @@ export default async function EvaluationPage() {
     return (
       <Card>
         <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
-        <p className="mt-2 text-[var(--muted)]">Masuk untuk berlatih soal yang belum ingat atau sebagian benar.</p>
+        <p className="mt-2 text-[var(--muted)]">
+          Masuk untuk berlatih soal yang belum ingat atau sebagian benar.
+        </p>
         <Link href="/login">
           <Button className="mt-4">Masuk</Button>
         </Link>
@@ -31,5 +33,11 @@ export default async function EvaluationPage() {
     getEvaluationSummary(user.id)
   ]);
 
-  return <EvaluationApp initialBank={bank} initialHistory={history} initialSummary={summary} />;
+  return (
+    <EvaluationApp
+      initialBank={bank}
+      initialHistory={history}
+      initialSummary={summary}
+    />
+  );
 }

@@ -10,9 +10,15 @@ export class DomainError extends Error {
   }
 }
 
-export const notFoundError = () => new DomainError("NOT_FOUND", "Pertanyaan tidak ditemukan.", 404);
+export const notFoundError = () =>
+  new DomainError("NOT_FOUND", "Pertanyaan tidak ditemukan.", 404);
 export const alreadyAssessedError = () =>
   new DomainError("ALREADY_ASSESSED", "Pertanyaan sudah dinilai.", 409);
-export const hintLimitError = (message: string) => new DomainError("HINT_LIMIT", message, 409);
+export const hintLimitError = (message: string) =>
+  new DomainError("HINT_LIMIT", message, 409);
 export const revealCompleteError = () =>
-  new DomainError("REVEAL_COMPLETE", "Seluruh ayat pada halaman ini sudah terbuka.", 409);
+  new DomainError(
+    "REVEAL_COMPLETE",
+    "Seluruh ayat pada halaman ini sudah terbuka.",
+    409
+  );

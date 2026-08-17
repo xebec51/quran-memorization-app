@@ -12,7 +12,10 @@ export type AuthFormErrorCode =
 export function authFormErrorCode(error: unknown): AuthFormErrorCode {
   if (error instanceof ZodError) return "invalid_input";
   if (error instanceof RateLimitedError) return "rate_limited";
-  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  ) {
     return "email_taken";
   }
   return "server_error";

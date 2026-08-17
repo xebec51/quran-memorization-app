@@ -12,7 +12,8 @@ import type { ProviderChapter, ProviderVerse, QuranProvider } from "./types";
 export class QuranFoundationProvider implements QuranProvider {
   private clientId = process.env.QF_CLIENT_ID ?? "";
   private clientSecret = process.env.QF_CLIENT_SECRET ?? "";
-  private qfEnv = process.env.QF_ENV === "production" ? "production" : "prelive";
+  private qfEnv =
+    process.env.QF_ENV === "production" ? "production" : "prelive";
 
   private client = createServerClient({
     clientId: this.clientId,
@@ -48,20 +49,23 @@ export class QuranFoundationProvider implements QuranProvider {
   }
 
   async getVersesByPage(pageNumber: number): Promise<ProviderVerse[]> {
-    const verses = await this.client.content.v4.verses.byPage(pageNumber as PageNumber, {
-      words: true,
-      fields: {
-        chapterId: true,
-        textUthmani: true,
-        textUthmaniSimple: true
-      },
-      wordFields: {
-        textUthmani: true,
-        location: true,
-        verseKey: true
-      },
-      perPage: 300
-    });
+    const verses = await this.client.content.v4.verses.byPage(
+      pageNumber as PageNumber,
+      {
+        words: true,
+        fields: {
+          chapterId: true,
+          textUthmani: true,
+          textUthmaniSimple: true
+        },
+        wordFields: {
+          textUthmani: true,
+          location: true,
+          verseKey: true
+        },
+        perPage: 300
+      }
+    );
     return verses.map((verse) => normalizeVerse(verse));
   }
 }

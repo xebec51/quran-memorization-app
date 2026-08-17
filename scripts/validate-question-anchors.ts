@@ -19,6 +19,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stderr.write(`${error instanceof Error ? error.message : "Anchor validation failed"}\n`);
+  process.stderr.write(
+    `${error instanceof Error ? error.message : "Anchor validation failed"}\n`
+  );
   process.exit(1);
 });
