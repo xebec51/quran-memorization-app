@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { apiFetch } from "@/lib/client/api";
 
 type ReaderData = {
   verses: {
@@ -25,16 +26,16 @@ export function Reader() {
 
   const load = useCallback(async () => {
     setError(null);
-    const response = await fetch(`/api/reader?mode=${mode}&value=${value}`);
-    const json = (await response.json()) as {
-      data?: ReaderData;
-      error?: { message: string };
-    };
-    if (!response.ok || !json.data) {
-      setError(json.error?.message ?? "Gagal memuat mushaf.");
-      return;
+    try {
+      const data = await apiFetch<ReaderData>(
+        `/api/reader?mode=${mode}&value=${value}`,
+        undefined,
+        { method: "GET" }
+      );
+      setData(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal memuat mushaf.");
     }
-    setData(json.data);
   }, [mode, value]);
 
   return (
@@ -73,7 +74,11 @@ export function Reader() {
           <Search aria-hidden className="h-4 w-4" /> Buka
         </Button>
       </Card>
-      {error ? <Card className="text-[var(--danger)]">{error}</Card> : null}
+      {error ? (
+        <Card role="alert" className="text-[var(--danger)]">
+          {error}
+        </Card>
+      ) : null}
       <div className="grid gap-3">
         {data?.verses.length === 0 ? (
           <Card>Data Quran belum tersedia. Jalankan `npm run quran:sync`.</Card>

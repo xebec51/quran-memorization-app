@@ -14,7 +14,8 @@ A production-oriented Quran memorization web app in Bahasa Indonesia. The primar
 - A full cycle consumes all 604 Madani Mushaf pages exactly once as primary question pages.
 - Hints: Juz, Surah, progressive fragment extension, and next ayah.
 - Question prompts always begin at the first word of the selected ayah while still varying the represented page area.
-- Answer reveal and self-assessment: Benar, Sebagian benar, Belum ingat.
+- Progressive answer reveal (one ayah per click, through the whole next Mushaf page) and self-assessment: Benar, Sebagian benar, Belum ingat.
+- Evaluation practice mode: repeatable, page-hidden re-testing of any question last assessed Sebagian benar/Belum ingat, with its own reveal progress and attempt history.
 - User-specific history and analytics.
 - Quran reader by surah, juz, and page.
 
@@ -52,22 +53,36 @@ npm run build
 npm run lint
 npm run typecheck
 npm test
+npm run test:integration
 npm run test:e2e
 npm run quran:sync
 npm run quran:validate
+npm run quran:validate-anchors
 npm run db:generate
 npm run db:migrate
 npm run db:deploy
 npm run db:seed
 ```
 
+`npm run test:e2e` and `npm run test:integration` must run against an
+isolated Postgres, never the shared Neon database - see
+[Architecture: Local e2e Must Never Touch the Shared Database](docs/architecture.md#local-e2e-must-never-touch-the-shared-database).
+Both resolve their database URL through `lib/db/test-database-guard.ts`,
+which reads only `TEST_DATABASE_URL` (never `DATABASE_URL`, never
+`.env.local`) and refuses to run at all against anything whose hostname
+isn't `localhost`/`127.0.0.1`. Set `TEST_DATABASE_URL` explicitly to
+point at your own isolated Postgres (e.g.
+`TEST_DATABASE_URL=postgresql://ci:ci@127.0.0.1:5433/ci npm run
+test:integration`); leaving it unset falls back to that same address by
+default rather than skipping.
+
 ## Quran Data
 
-Arabic Uthmani text and metadata are synchronized from Quran Foundation's Content API using the official server SDK. The sync command imports chapters, pages, verses, words, page numbers, juz numbers, line metadata where available, and canonical ordering. `npm run quran:validate` fails loudly if structural invariants are violated.
+Arabic Uthmani text and metadata are synchronized from Quran Foundation's Content API using the official server SDK. The sync command imports chapters, pages, verses, words, page numbers, juz numbers, line metadata where available, and canonical ordering. `npm run quran:validate` fails loudly if structural invariants are violated. See [docs/quran-data-integrity.md](docs/quran-data-integrity.md) for how sync stays safe to run against a live database (no long-held table lock, validation-gated commit, stale rows reported not deleted).
 
 ## Memorization Algorithm
 
-See [docs/memorization-engine.md](docs/memorization-engine.md). The key invariant is enforced both by pure algorithm tests and by the database uniqueness constraint `UNIQUE(cycleId, primaryPageNumber)`.
+See [docs/memorization-engine.md](docs/memorization-engine.md) for cycle/package construction, progressive answer reveal, and evaluation practice mode. The key invariant is enforced both by pure algorithm tests and by the database uniqueness constraint `UNIQUE(cycleId, primaryPageNumber)`.
 
 ## Security Notes
 

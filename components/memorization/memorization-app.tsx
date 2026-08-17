@@ -315,7 +315,11 @@ export function MemorizationApp({
           <h1 className="text-2xl font-semibold">Latihan Expert</h1>
           <p className="mt-1 text-[var(--muted)]">{productConfig.tagline}</p>
         </div>
-        {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+        {error ? (
+          <p role="alert" className="text-sm text-[var(--danger)]">
+            {error}
+          </p>
+        ) : null}
         <Button onClick={loadPackage} disabled={pendingAction === "package"}>
           {pendingAction === "package" ? "Memuat..." : "Mulai latihan"}
         </Button>
@@ -333,7 +337,9 @@ export function MemorizationApp({
           pendingAssessmentCount={pendingAssessmentCount}
         />
         {error ? (
-          <Card className="text-sm text-[var(--danger)]">{error}</Card>
+          <Card role="alert" className="text-sm text-[var(--danger)]">
+            {error}
+          </Card>
         ) : null}
         <Card className="grid gap-4 tasmiq-panel-enter">
           <div>
