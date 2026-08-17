@@ -61,10 +61,16 @@ export default async function HistoryPage({
         </Card>
       ))}
       {history.nextCursor ? (
+        // This is a plain server-rendered navigation (no client JS), so it
+        // replaces the list rather than appending to it - "Halaman
+        // berikutnya" describes that correctly. Do not relabel this
+        // "Muat lebih banyak" (load more): that label belongs to an
+        // appending list, like components/evaluation/evaluation-app.tsx's
+        // loadMoreHistory, which this page deliberately is not.
         <Link
           href={`/history?cursor=${encodeURIComponent(history.nextCursor)}`}
         >
-          <Button variant="secondary">Muat lebih banyak</Button>
+          <Button variant="secondary">Halaman berikutnya →</Button>
         </Link>
       ) : null}
     </div>
