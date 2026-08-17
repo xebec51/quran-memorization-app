@@ -56,6 +56,28 @@ export type GeneratedQuestionSource = {
   fragmentText: string;
 };
 
+export type RevealedAyah = {
+  verseKey: string;
+  text: string;
+  surah: string;
+  juz: number;
+  page: number;
+};
+
+export type RevealProgress = {
+  revealedAyahCount: number;
+  totalAyahCount: number;
+  isComplete: boolean;
+  verses: RevealedAyah[];
+};
+
+export type RevealMutationResult = RevealProgress & { questionId: string };
+
+export type PublicHintLine = {
+  type: HintType;
+  text: string;
+};
+
 export type PublicQuestion = {
   id: string;
   order: number;
@@ -67,7 +89,8 @@ export type PublicQuestion = {
     extendFragment: boolean;
     nextVerse: boolean;
   };
-  answerRevealed: boolean;
+  hints: PublicHintLine[];
+  reveal: RevealProgress;
   assessment: RecallAssessment | null;
 };
 
@@ -91,4 +114,28 @@ export type AssessmentMutationResult = {
   questionId: string;
   assessment: RecallAssessment;
   packageCompleted: boolean;
+};
+
+export type EvaluationBankItem = {
+  questionId: string;
+  fragmentText: string;
+  lastResult: RecallAssessment;
+  primaryPageNumber: number;
+  lastAttemptAt: string | null;
+};
+
+export type EvaluationAttemptDto = {
+  id: string;
+  questionId: string;
+  result: RecallAssessment;
+  belCount: number;
+  tuntunCount: number;
+  createdAt: string;
+};
+
+export type EvaluationHistorySummary = {
+  totalAttempts: number;
+  totalBelCount: number;
+  totalTuntunCount: number;
+  resultCounts: Record<RecallAssessment, number>;
 };

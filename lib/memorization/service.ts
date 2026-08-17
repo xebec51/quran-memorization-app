@@ -7,6 +7,8 @@ import { measureServerTiming } from "@/lib/performance/timing";
 import { createCyclePlan } from "./cycle/plan";
 import { CryptoRandomSource, SeededRandomSource } from "./random";
 import { generateQuestionSource, nextBucket } from "./question/generator";
+import { computeRevealBoundary } from "./reveal/service";
+import { alreadyAssessedError, hintLimitError, notFoundError } from "./errors";
 import type {
   AssessmentMutationResult,
   CyclePlan,
@@ -16,7 +18,8 @@ import type {
   PublicHint,
   PublicQuestion,
   QuranWordRef,
-  RecallAssessment
+  RecallAssessment,
+  RevealedAyah
 } from "./types";
 import {
   assertHintLimit,
@@ -30,18 +33,17 @@ const publicQuestionSelect = {
   id: true,
   orderInPackage: true,
   visibleFragmentText: true,
-  answerRevealedAt: true,
   maxExtensionCount: true,
   maxNextVerseCount: true,
+  revealedAyahCount: true,
+  revealTotalAyahCount: true,
+  revealedVersesJson: true,
   hintEvents: {
-    select: {
-      type: true
-    }
+    select: { type: true, payload: true },
+    orderBy: { createdAt: "asc" }
   },
   assessment: {
-    select: {
-      assessment: true
-    }
+    select: { assessment: true }
   }
 } satisfies Prisma.MemorizationQuestionSelect;
 
@@ -191,9 +193,8 @@ export async function requestQuestionHint(
             where: { id: questionId, userId },
             select: hintQuestionSelect
           });
-          if (!question) throw new Error("Pertanyaan tidak ditemukan.");
-          if (question.state === "ASSESSED")
-            throw new Error("Pertanyaan sudah dinilai.");
+          if (!question) throw notFoundError();
+          if (question.state === "ASSESSED") throw alreadyAssessedError();
 
           const counts = hintCountsFromEvents(question.hintEvents);
           const existingOfType = question.hintEvents.find(
@@ -292,7 +293,7 @@ export async function requestQuestionHint(
             select: { verseKey: true, textUthmani: true }
           });
           if (!nextVerse)
-            throw new Error("Tidak ada ayat berikutnya untuk ditampilkan.");
+            throw hintLimitError("Tidak ada ayat berikutnya untuk ditampilkan.");
           const payload = projectNextVerseHint({
             ordinal,
             verseKey: nextVerse.verseKey,
@@ -311,54 +312,6 @@ export async function requestQuestionHint(
   );
 }
 
-export async function revealAnswer(userId: string, questionId: string) {
-  return measureServerTiming("reveal_request", async () => {
-    const question = await prisma.memorizationQuestion.findFirst({
-      where: { id: questionId, userId },
-      select: {
-        id: true,
-        surahId: true,
-        anchorVerseId: true,
-        juzNumber: true,
-        primaryPageNumber: true,
-        answerRevealedAt: true
-      }
-    });
-    if (!question) throw new Error("Pertanyaan tidak ditemukan.");
-    const [chapter, anchorVerse] = await Promise.all([
-      prisma.quranChapter.findUniqueOrThrow({
-        where: { id: question.surahId },
-        select: { nameTransliterated: true, nameArabic: true }
-      }),
-      prisma.quranVerse.findUniqueOrThrow({
-        where: { id: question.anchorVerseId },
-        select: { verseKey: true, globalOrder: true, textUthmani: true }
-      })
-    ]);
-    const continuation = await prisma.quranVerse.findMany({
-      where: { globalOrder: { gt: anchorVerse.globalOrder } },
-      orderBy: { globalOrder: "asc" },
-      take: 2,
-      select: { textUthmani: true }
-    });
-    if (!question.answerRevealedAt) {
-      await prisma.memorizationQuestion.update({
-        where: { id: question.id },
-        data: { state: "ANSWER_REVEALED", answerRevealedAt: new Date() },
-        select: { id: true }
-      });
-    }
-    return {
-      surah: `${chapter.nameTransliterated} (${chapter.nameArabic})`,
-      verseKey: anchorVerse.verseKey,
-      juz: question.juzNumber,
-      page: question.primaryPageNumber,
-      text: anchorVerse.textUthmani,
-      continuation: continuation.map((verse) => verse.textUthmani)
-    };
-  });
-}
-
 export async function submitAssessment(
   userId: string,
   questionId: string,
@@ -372,7 +325,7 @@ export async function submitAssessment(
             where: { id: questionId, userId },
             select: { id: true, packageId: true }
           });
-          if (!question) throw new Error("Pertanyaan tidak ditemukan.");
+          if (!question) throw notFoundError();
 
           await tx.questionAssessment.upsert({
             where: { questionId },
@@ -488,40 +441,49 @@ async function allocatePackage(
       tx,
       planPackage.questions.map((question) => question.pageNumber)
     );
-    const questionRows: GeneratedQuestionRow[] = [];
 
-    for (const [index, planned] of planPackage.questions.entries()) {
+    const sources = planPackage.questions.map((planned, index) => {
       const words = wordsByPage.get(planned.pageNumber);
       if (!words)
         throw new Error(`Words for page ${planned.pageNumber} were not loaded`);
-      const source = generateQuestionSource({
+      return generateQuestionSource({
         primaryPageNumber: planned.pageNumber,
         assignedBand: planned.juzBand,
         words,
         preferredBucket: nextBucket(index),
         rng: new CryptoRandomSource()
       });
-      questionRows.push({
-        id: randomUUID(),
-        userId,
-        cycleId: cycle.id,
-        packageId: pkg.id,
-        orderInPackage: index + 1,
-        primaryPageNumber: source.primaryPageNumber,
-        juzNumber: source.juzNumber,
-        juzBand: source.juzBand,
-        surahId: source.surahId,
-        anchorVerseId: source.anchorVerseId,
-        anchorVerseKey: source.anchorVerseKey,
-        pagePositionBucket: source.pagePositionBucket,
-        fragmentStartWordId: source.fragmentStartWordId,
-        initialWordCount: source.initialWordCount,
-        visibleWordCount: source.visibleWordCount,
-        visibleFragmentText: source.fragmentText,
-        maxExtensionCount: productConfig.extensionLimit,
-        maxNextVerseCount: productConfig.nextVerseLimit
-      });
-    }
+    });
+
+    const boundaries = await Promise.all(
+      sources.map((source) =>
+        computeRevealBoundary(tx, source.anchorVerseId, source.primaryPageNumber)
+      )
+    );
+
+    const questionRows: GeneratedQuestionRow[] = sources.map((source, index) => ({
+      id: randomUUID(),
+      userId,
+      cycleId: cycle.id,
+      packageId: pkg.id,
+      orderInPackage: index + 1,
+      primaryPageNumber: source.primaryPageNumber,
+      juzNumber: source.juzNumber,
+      juzBand: source.juzBand,
+      surahId: source.surahId,
+      anchorVerseId: source.anchorVerseId,
+      anchorVerseKey: source.anchorVerseKey,
+      pagePositionBucket: source.pagePositionBucket,
+      fragmentStartWordId: source.fragmentStartWordId,
+      initialWordCount: source.initialWordCount,
+      visibleWordCount: source.visibleWordCount,
+      visibleFragmentText: source.fragmentText,
+      maxExtensionCount: productConfig.extensionLimit,
+      maxNextVerseCount: productConfig.nextVerseLimit,
+      revealBoundaryVerseId: boundaries[index].boundaryVerseId,
+      revealTotalAyahCount: boundaries[index].totalAyahCount,
+      revealedVersesJson: [] as unknown as Prisma.InputJsonValue
+    }));
     await tx.memorizationQuestion.createMany({ data: questionRows });
 
     await tx.memorizationCycle.update({
@@ -543,12 +505,14 @@ async function allocatePackage(
           cycle.nextPackageNo * productConfig.questionsPerPackage
         )
       },
-      questions: questionRows.map(publicQuestionFromGeneratedRow)
+      questions: questionRows.map(publicQuestionFromGeneratedRow),
+      activeQuestionId: questionRows[0]?.id ?? null
     };
   });
 }
 
 function packageDtoFromRecord(pkg: PackageForDto) {
+  const questions = pkg.questions.map(publicQuestionFromRecord);
   return {
     id: pkg.id,
     packageNumber: pkg.packageNumber,
@@ -559,33 +523,51 @@ function packageDtoFromRecord(pkg: PackageForDto) {
       state: pkg.cycle.state,
       pagesTested: pkg.cycle._count.questions
     },
-    questions: pkg.questions.map(publicQuestionFromRecord)
+    questions,
+    activeQuestionId: questions.find((question) => question.assessment === null)?.id ?? null
   };
 }
 
-function publicQuestionFromRecord(question: QuestionForPublicDto) {
+function publicQuestionFromRecord(question: QuestionForPublicDto): PublicQuestion {
   const counts = hintCountsFromEvents(question.hintEvents);
+  const revealedAyahCount = question.revealedAyahCount;
+  const totalAyahCount = question.revealTotalAyahCount;
   return {
     id: question.id,
     order: question.orderInPackage,
     totalQuestions: productConfig.questionsPerPackage,
     fragmentText: question.visibleFragmentText,
     availableHints: availableHintsFromCounts(question, counts),
-    answerRevealed: Boolean(question.answerRevealedAt),
+    hints: question.hintEvents.map((event) => ({
+      type: event.type,
+      text: (event.payload as unknown as PublicHint).text
+    })),
+    reveal: {
+      revealedAyahCount,
+      totalAyahCount,
+      isComplete: revealedAyahCount >= totalAyahCount,
+      verses: question.revealedVersesJson as unknown as RevealedAyah[]
+    },
     assessment: question.assessment?.assessment ?? null
-  } satisfies PublicQuestion;
+  };
 }
 
-function publicQuestionFromGeneratedRow(question: GeneratedQuestionRow) {
+function publicQuestionFromGeneratedRow(question: GeneratedQuestionRow): PublicQuestion {
   return {
     id: question.id,
     order: question.orderInPackage,
     totalQuestions: productConfig.questionsPerPackage,
     fragmentText: question.visibleFragmentText,
     availableHints: availableHintsFromCounts(question, emptyHintCounts()),
-    answerRevealed: false,
+    hints: [],
+    reveal: {
+      revealedAyahCount: 0,
+      totalAyahCount: question.revealTotalAyahCount,
+      isComplete: false,
+      verses: []
+    },
     assessment: null
-  } satisfies PublicQuestion;
+  };
 }
 
 async function wordRefsForPackagePages(
@@ -819,4 +801,6 @@ type GeneratedQuestionRow = Prisma.MemorizationQuestionCreateManyInput & {
   visibleFragmentText: string;
   maxExtensionCount: number;
   maxNextVerseCount: number;
+  revealBoundaryVerseId: number;
+  revealTotalAyahCount: number;
 };

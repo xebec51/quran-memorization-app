@@ -61,12 +61,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  sessions    Session[]
-  cycles      MemorizationCycle[]
-  packages    MemorizationPackage[]
-  questions   MemorizationQuestion[]
-  hintEvents  HintEvent[]
-  assessments QuestionAssessment[]
+  sessions           Session[]
+  cycles             MemorizationCycle[]
+  packages           MemorizationPackage[]
+  questions          MemorizationQuestion[]
+  hintEvents         HintEvent[]
+  assessments        QuestionAssessment[]
+  evaluationAttempts EvaluationAttempt[]
 }
 
 model AuthRateLimit {
@@ -217,35 +218,40 @@ model MemorizationPackage {
 }
 
 model MemorizationQuestion {
-  id                  String             @id @default(cuid())
-  userId              String
-  cycleId             String
-  packageId           String
-  orderInPackage      Int
-  state               QuestionState      @default(ACTIVE)
-  primaryPageNumber   Int
-  juzNumber           Int
-  juzBand             JuzBand
-  surahId             Int
-  anchorVerseId       Int
-  anchorVerseKey      String
-  pagePositionBucket  PagePositionBucket
-  fragmentStartWordId Int
-  initialWordCount    Int
-  visibleWordCount    Int
-  visibleFragmentText String
-  maxExtensionCount   Int                @default(3)
-  maxNextVerseCount   Int                @default(3)
-  answerRevealedAt    DateTime?
-  createdAt           DateTime           @default(now())
-  updatedAt           DateTime           @updatedAt
+  id                    String             @id @default(cuid())
+  userId                String
+  cycleId               String
+  packageId             String
+  orderInPackage        Int
+  state                 QuestionState      @default(ACTIVE)
+  primaryPageNumber     Int
+  juzNumber             Int
+  juzBand               JuzBand
+  surahId               Int
+  anchorVerseId         Int
+  anchorVerseKey        String
+  pagePositionBucket    PagePositionBucket
+  fragmentStartWordId   Int
+  initialWordCount      Int
+  visibleWordCount      Int
+  visibleFragmentText   String
+  maxExtensionCount     Int                @default(3)
+  maxNextVerseCount     Int                @default(3)
+  answerRevealedAt      DateTime?
+  revealedAyahCount     Int                @default(0)
+  revealBoundaryVerseId Int
+  revealTotalAyahCount  Int
+  revealedVersesJson    Json               @default("[]")
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
 
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cycle       MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  package     MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  primaryPage QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
-  hintEvents  HintEvent[]
-  assessment  QuestionAssessment?
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle              MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  package            MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  primaryPage        QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
+  hintEvents         HintEvent[]
+  assessment         QuestionAssessment?
+  evaluationAttempts EvaluationAttempt[]
 
   @@unique([cycleId, primaryPageNumber])
   @@unique([packageId, orderInPackage])
@@ -285,4 +291,21 @@ model QuestionAssessment {
 
   @@index([userId, createdAt])
   @@index([userId, assessment])
+}
+
+model EvaluationAttempt {
+  id          String           @id @default(cuid())
+  userId      String
+  questionId  String
+  result      RecallAssessment
+  belCount    Int
+  tuntunCount Int
+  createdAt   DateTime         @default(now())
+
+  user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([questionId, createdAt])
+  @@index([userId, result])
 }

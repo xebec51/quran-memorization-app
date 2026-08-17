@@ -16,6 +16,23 @@ import { productConfig } from "@/lib/config";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 
+type RevealedAyah = {
+  verseKey: string;
+  text: string;
+  surah: string;
+  juz: number;
+  page: number;
+};
+
+type RevealProgress = {
+  revealedAyahCount: number;
+  totalAyahCount: number;
+  isComplete: boolean;
+  verses: RevealedAyah[];
+};
+
+type HintLine = { type: string; text: string };
+
 type Question = {
   id: string;
   order: number;
@@ -27,7 +44,8 @@ type Question = {
     extendFragment: boolean;
     nextVerse: boolean;
   };
-  answerRevealed: boolean;
+  hints: HintLine[];
+  reveal: RevealProgress;
   assessment: Assessment | null;
 };
 
@@ -37,9 +55,9 @@ type PackageDto = {
   state: string;
   cycle: { cycleNumber: number; state: string; pagesTested: number };
   questions: Question[];
+  activeQuestionId: string | null;
 };
 
-type HintLine = { questionId: string; type: string; text: string };
 type PendingAction = "package" | "reveal" | `hint:${string}` | null;
 
 type HintMutation = {
@@ -49,11 +67,21 @@ type HintMutation = {
   fragmentText?: string;
 };
 
+type RevealMutation = RevealProgress & { questionId: string };
+
 type AssessmentMutation = {
   questionId: string;
   assessment: Assessment;
   packageCompleted: boolean;
 };
+
+function firstActiveIndex(pkg: PackageDto) {
+  if (pkg.activeQuestionId) {
+    const index = pkg.questions.findIndex((item) => item.id === pkg.activeQuestionId);
+    if (index >= 0) return index;
+  }
+  return 0;
+}
 
 export function MemorizationApp({
   initialPackage = null
@@ -61,17 +89,9 @@ export function MemorizationApp({
   initialPackage?: PackageDto | null;
 }) {
   const [pkg, setPkg] = useState<PackageDto | null>(initialPackage);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [hints, setHints] = useState<HintLine[]>([]);
-  const [answer, setAnswer] = useState<null | {
-    surah: string;
-    verseKey: string;
-    juz: number;
-    page: number;
-    text: string;
-    continuation: string[];
-  }>(null);
-  const [assessmentOpen, setAssessmentOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(() =>
+    initialPackage ? firstActiveIndex(initialPackage) : 0
+  );
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [pendingAssessments, setPendingAssessments] = useState<
     Record<string, Assessment>
@@ -79,12 +99,9 @@ export function MemorizationApp({
   const [error, setError] = useState<string | null>(null);
   const actionLockRef = useRef(false);
   const inFlightAssessmentsRef = useRef(new Set<string>());
+  const revealAnnounceRef = useRef<HTMLDivElement>(null);
 
   const question = pkg?.questions[activeIndex] ?? null;
-  const questionHints = useMemo(
-    () => hints.filter((hint) => hint.questionId === question?.id),
-    [hints, question?.id]
-  );
   const pendingAssessmentCount = Object.keys(pendingAssessments).length;
   const packageComplete = Boolean(
     pkg &&
@@ -135,10 +152,7 @@ export function MemorizationApp({
     try {
       const data = await api<PackageDto>("/api/memorization/next-package");
       setPkg(data);
-      setActiveIndex(0);
-      setAnswer(null);
-      setAssessmentOpen(false);
-      setHints([]);
+      setActiveIndex(firstActiveIndex(data));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat paket.");
     } finally {
@@ -153,18 +167,6 @@ export function MemorizationApp({
         questionId: question.id,
         type
       });
-      setHints((current) => [
-        ...current.filter(
-          (hint) =>
-            !(
-              hint.questionId === question.id &&
-              hint.type === data.hint.type &&
-              data.hint.type !== "EXTEND_FRAGMENT" &&
-              data.hint.type !== "NEXT_VERSE"
-            )
-        ),
-        { questionId: question.id, type: data.hint.type, text: data.hint.text }
-      ]);
       setPkg((current) =>
         current
           ? {
@@ -174,7 +176,18 @@ export function MemorizationApp({
                   ? {
                       ...item,
                       availableHints: data.availableHints,
-                      fragmentText: data.fragmentText ?? item.fragmentText
+                      fragmentText: data.fragmentText ?? item.fragmentText,
+                      hints: [
+                        ...item.hints.filter(
+                          (hint) =>
+                            !(
+                              hint.type === data.hint.type &&
+                              data.hint.type !== "EXTEND_FRAGMENT" &&
+                              data.hint.type !== "NEXT_VERSE"
+                            )
+                        ),
+                        { type: data.hint.type, text: data.hint.text }
+                      ]
                     }
                   : item
               )
@@ -188,33 +201,43 @@ export function MemorizationApp({
     }
   }
 
-  async function reveal() {
-    if (!question || !beginAction("reveal")) return;
+  async function revealNext() {
+    if (!question || !canUseQuestionActions) return;
+    if (!beginAction("reveal")) return;
+    const expectedRevealedCount = question.reveal.revealedAyahCount;
     try {
-      const data = await api<{
-        surah: string;
-        verseKey: string;
-        juz: number;
-        page: number;
-        text: string;
-        continuation: string[];
-      }>("/api/memorization/reveal", { questionId: question.id });
-      setAnswer(data);
-      setAssessmentOpen(false);
+      const data = await api<RevealMutation>("/api/memorization/reveal", {
+        questionId: question.id,
+        expectedRevealedCount
+      });
       setPkg((current) =>
         current
           ? {
               ...current,
               questions: current.questions.map((item) =>
-                item.id === question.id
-                  ? { ...item, answerRevealed: true }
+                item.id === data.questionId
+                  ? {
+                      ...item,
+                      reveal: {
+                        revealedAyahCount: data.revealedAyahCount,
+                        totalAyahCount: data.totalAyahCount,
+                        isComplete: data.isComplete,
+                        verses: data.verses
+                      }
+                    }
                   : item
               )
             }
           : current
       );
+      if (revealAnnounceRef.current) {
+        const last = data.verses[data.verses.length - 1];
+        revealAnnounceRef.current.textContent = last
+          ? `Ayat ${data.revealedAyahCount} dari ${data.totalAyahCount} terbuka: ${last.verseKey}`
+          : "";
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal membuka jawaban.");
+      setError(err instanceof Error ? err.message : "Gagal membuka ayat berikutnya.");
     } finally {
       endAction();
     }
@@ -227,12 +250,12 @@ export function MemorizationApp({
     const assessedQuestion = question;
     const previousPackage = pkg;
     const previousIndex = activeIndex;
-    const previousAnswer = answer;
-    const previousAssessmentOpen = assessmentOpen;
     const nextQuestions = pkg.questions.map((item) =>
       item.id === assessedQuestion.id ? { ...item, assessment } : item
     );
     const nextPackageCompleted = nextQuestions.every((item) => item.assessment);
+    const nextActiveId =
+      nextQuestions.find((item) => !item.assessment)?.id ?? assessedQuestion.id;
 
     inFlightAssessmentsRef.current.add(assessedQuestion.id);
     setPendingAssessments((current) => ({
@@ -243,12 +266,13 @@ export function MemorizationApp({
     setPkg({
       ...pkg,
       state: nextPackageCompleted ? "COMPLETED" : pkg.state,
-      questions: nextQuestions
+      questions: nextQuestions,
+      activeQuestionId: nextActiveId
     });
-    setAnswer(null);
-    setAssessmentOpen(false);
-    if (!nextPackageCompleted && activeIndex < pkg.questions.length - 1)
-      setActiveIndex(activeIndex + 1);
+    if (!nextPackageCompleted) {
+      const nextIndex = nextQuestions.findIndex((item) => item.id === nextActiveId);
+      if (nextIndex >= 0) setActiveIndex(nextIndex);
+    }
 
     try {
       const data = await api<AssessmentMutation>(
@@ -275,8 +299,6 @@ export function MemorizationApp({
     } catch (err) {
       setPkg(previousPackage);
       setActiveIndex(previousIndex);
-      setAnswer(previousAnswer);
-      setAssessmentOpen(previousAssessmentOpen || true);
       setError(
         err instanceof Error
           ? `Evaluasi belum tersimpan: ${err.message}`
@@ -290,12 +312,6 @@ export function MemorizationApp({
         return rest;
       });
     }
-  }
-
-  function openAssessment() {
-    if (!canUseQuestionActions) return;
-    setAnswer(null);
-    setAssessmentOpen(true);
   }
 
   if (!pkg || !question) {
@@ -356,8 +372,6 @@ export function MemorizationApp({
             disabled={questionActionsBusy}
             onClick={() => {
               setActiveIndex(index);
-              setAnswer(null);
-              setAssessmentOpen(false);
             }}
             className={`rounded-md border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${
               index === activeIndex
@@ -374,19 +388,16 @@ export function MemorizationApp({
       {error ? (
         <Card className="text-sm text-[var(--danger)]">{error}</Card>
       ) : null}
+      <div aria-live="polite" className="sr-only" ref={revealAnnounceRef} />
       <Card className="grid gap-5">
         <QuestionPanel
           key={question.id}
           question={question}
-          questionHints={questionHints}
-          answer={answer}
-          assessmentOpen={assessmentOpen}
           pendingAction={pendingAction}
           canUseQuestionActions={canUseQuestionActions}
           pendingAssessment={pendingAssessments[question.id] ?? null}
           onHint={requestHint}
-          onReveal={reveal}
-          onOpenAssessment={openAssessment}
+          onRevealNext={revealNext}
           onAssess={assess}
         />
       </Card>
@@ -423,37 +434,33 @@ function MemorizationHeader({
 
 function QuestionPanel({
   question,
-  questionHints,
-  answer,
-  assessmentOpen,
   pendingAction,
   canUseQuestionActions,
   pendingAssessment,
   onHint,
-  onReveal,
-  onOpenAssessment,
+  onRevealNext,
   onAssess
 }: {
   question: Question;
-  questionHints: HintLine[];
-  answer: {
-    surah: string;
-    verseKey: string;
-    juz: number;
-    page: number;
-    text: string;
-    continuation: string[];
-  } | null;
-  assessmentOpen: boolean;
   pendingAction: PendingAction;
   canUseQuestionActions: boolean;
   pendingAssessment: Assessment | null;
   onHint: (type: string) => void;
-  onReveal: () => void;
-  onOpenAssessment: () => void;
+  onRevealNext: () => void;
   onAssess: (assessment: Assessment) => void;
 }) {
+  const [assessmentRequested, setAssessmentRequested] = useState(false);
   const questionComplete = question.assessment !== null;
+  const reveal = question.reveal;
+  // Auto-show once the whole page has been revealed, in addition to the
+  // user explicitly clicking "Soal selesai dijawab" - derived directly
+  // during render instead of synced via an effect.
+  const assessmentOpen = assessmentRequested || reveal.isComplete;
+  const revealButtonLabel = useMemo(() => {
+    if (pendingAction === "reveal") return "Membuka...";
+    return reveal.revealedAyahCount === 0 ? "Lihat Ayat Pertama" : "Lihat Ayat Berikutnya";
+  }, [pendingAction, reveal.revealedAyahCount]);
+
   return (
     <div className="grid gap-5 tasmiq-panel-enter">
       <div
@@ -512,9 +519,9 @@ function QuestionPanel({
           <StepForward aria-hidden className="h-4 w-4" /> Ayat
         </Button>
       </div>
-      {questionHints.length ? (
+      {question.hints.length ? (
         <div className="grid gap-2 tasmiq-panel-enter">
-          {questionHints.map((hint, index) => (
+          {question.hints.map((hint, index) => (
             <div
               key={`${hint.type}-${index}`}
               className="rounded-md bg-slate-50 p-3 text-sm"
@@ -544,49 +551,46 @@ function QuestionPanel({
         </div>
       ) : null}
       <div className="grid gap-2 sm:grid-cols-2">
-        <Button onClick={onReveal} disabled={!canUseQuestionActions}>
-          <Eye aria-hidden className="h-4 w-4" />{" "}
-          {pendingAction === "reveal" ? "Membuka..." : "Lihat Jawaban"}
+        <Button
+          onClick={onRevealNext}
+          disabled={!canUseQuestionActions || reveal.isComplete}
+        >
+          <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
         </Button>
         <Button
           variant="secondary"
-          onClick={onOpenAssessment}
+          onClick={() => setAssessmentRequested(true)}
           disabled={!canUseQuestionActions}
         >
           <Search aria-hidden className="h-4 w-4" /> Soal selesai dijawab
         </Button>
       </div>
+      {reveal.verses.length > 0 ? (
+        <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+          <p className="text-sm text-[var(--muted)]">
+            Ayat {reveal.revealedAyahCount}/{reveal.totalAyahCount} terbuka
+            {reveal.isComplete ? " - halaman ini selesai" : ""}
+          </p>
+          {reveal.verses.map((verse) => (
+            <div key={verse.verseKey} className="grid gap-1">
+              <p className="text-xs text-[var(--muted)]">
+                {verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman {verse.page}
+              </p>
+              <p
+                className="quran-text text-right text-3xl"
+                translate="no"
+                lang="ar"
+                dir="rtl"
+              >
+                {verse.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {assessmentOpen ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm font-medium">Evaluasi jawaban</p>
-          <AssessmentButtons onAssess={onAssess} />
-        </div>
-      ) : null}
-      {answer ? (
-        <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
-          <p className="text-sm text-[var(--muted)]">
-            {answer.surah} - {answer.verseKey} - Juz {answer.juz} - Halaman{" "}
-            {answer.page}
-          </p>
-          <p
-            className="quran-text text-right text-3xl"
-            translate="no"
-            lang="ar"
-            dir="rtl"
-          >
-            {answer.text}
-          </p>
-          {answer.continuation.map((line, index) => (
-            <p
-              key={index}
-              className="quran-text text-right text-2xl text-[var(--muted)]"
-              translate="no"
-              lang="ar"
-              dir="rtl"
-            >
-              {line}
-            </p>
-          ))}
           <AssessmentButtons onAssess={onAssess} />
         </div>
       ) : null}
