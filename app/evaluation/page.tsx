@@ -11,6 +11,8 @@ import { Card } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 20;
+
 export default async function EvaluationPage() {
   const user = await getCurrentUser();
   if (!user) {
@@ -28,8 +30,8 @@ export default async function EvaluationPage() {
   }
 
   const [bank, history, summary] = await Promise.all([
-    getEvaluationBank(user.id),
-    getEvaluationHistory(user.id, null, 20),
+    getEvaluationBank(user.id, null, PAGE_SIZE),
+    getEvaluationHistory(user.id, null, PAGE_SIZE),
     getEvaluationSummary(user.id)
   ]);
 

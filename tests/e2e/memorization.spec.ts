@@ -128,8 +128,10 @@ test("critical memorization flow", async ({
   // trusting client-side network-event timing.
   await expect(async () => {
     const bank = await request.get("/api/evaluation/bank");
-    const body = (await bank.json()) as { data: { questionId: string }[] };
-    expect(body.data).toHaveLength(2);
+    const body = (await bank.json()) as {
+      data: { items: { questionId: string }[]; nextCursor: string | null };
+    };
+    expect(body.data.items).toHaveLength(2);
   }).toPass({ timeout: 15_000 });
 
   await page.goto("/evaluation");
@@ -137,8 +139,18 @@ test("critical memorization flow", async ({
     page.getByRole("heading", { name: "Latihan Evaluasi" })
   ).toBeVisible();
   // Both the PARTIAL and the MISSED question from this run belong in the
-  // evaluation bank.
-  await expect(page.getByText("Bank Evaluasi (2)")).toBeVisible();
+  // evaluation bank. The bank is paginated (no total count in the
+  // heading, since a loaded-page count would be misleading once there
+  // are more pages than are currently fetched) - assert on the actual
+  // rendered items instead.
+  await expect(
+    page.getByRole("heading", { name: "Bank Evaluasi" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: /Latih soal (belum ingat|sebagian benar)/
+    })
+  ).toHaveCount(2);
 
   await page.goto("/analytics");
   await expect(page.getByRole("heading", { name: "Analitik" })).toBeVisible();

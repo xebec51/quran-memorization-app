@@ -21,11 +21,21 @@ export async function GET(request: Request) {
         cursor: searchParams.get("cursor"),
         limit: searchParams.get("limit") ?? undefined
       });
-      const [history, summary] = await Promise.all([
-        getEvaluationHistory(user.id, input.cursor, input.limit),
-        getEvaluationSummary(user.id)
-      ]);
-      return jsonOk({ ...history, summary });
+      const history = await getEvaluationHistory(
+        user.id,
+        input.cursor,
+        input.limit
+      );
+      // Summary is only meaningful on the first page - it is an
+      // aggregate over the whole history, not a per-page value, and the
+      // client already holds it after the initial load (updated locally
+      // as new attempts are submitted). Recomputing it on every
+      // load-more call would be a wasted pair of DB queries.
+      if (input.cursor === null) {
+        const summary = await getEvaluationSummary(user.id);
+        return jsonOk({ ...history, summary });
+      }
+      return jsonOk(history);
     } catch (error) {
       return routeError(error);
     }

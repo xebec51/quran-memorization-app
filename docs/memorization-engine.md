@@ -55,3 +55,73 @@ Hints are independent:
 - `NEXT_VERSE`: reveals the next complete ayah by canonical order, initially limited to 3 requests.
 
 Hint-only pages never consume primary page eligibility.
+
+## Progressive Reveal
+
+Answer reveal is click-by-click, not a single "show answer" action. Each
+click reveals exactly one more ayah, starting from the question's anchor
+verse. The reveal boundary - how far a question can be revealed - is
+`min(primaryPageNumber + 1, 604)`: reveal continues through the _entire
+next Mushaf page_ after the question's primary page, not just to the end
+of the primary page itself. A question anchored on page 1 reveals through
+the last ayah touching page 2 (2:5), not just the last ayah touching page
+1 (1:7). Page 604 has no next page, so `min(605, 604) = 604` naturally
+caps the boundary at the end of the Quran with no separate branch needed.
+An ayah is never cut at a page boundary - the boundary is always a whole
+verse's `globalOrder`, computed once from `QuranWord.globalOrder`
+following true canonical (chapter, verse, position) order (see
+`lib/quran/sync/sync.ts`), never from provider-supplied word ids, which
+are not monotonic across surah boundaries.
+
+`revealBoundaryVerseId` and `revealTotalAyahCount` are computed once, at
+question-generation time (`computeRevealBoundary`/
+`computeRevealBoundariesBulk` in `lib/memorization/reveal/service.ts`),
+and stored on the question - not recomputed on every click. Each reveal
+click (`revealNextAyah`) is guarded by an `expectedRevealedCount`
+optimistic-concurrency token: a duplicate click or network retry that
+arrives after an earlier one already landed simply observes a mismatch
+and returns the current state instead of advancing twice, and the whole
+mutation runs inside a `Serializable` transaction. Grading a question
+(`submitAssessment`) and switching to another question in the same
+package are both rejected server-side - not just hidden in the UI - until
+`revealedAyahCount >= revealTotalAyahCount`. A saved assessment is
+immutable: resubmitting the identical payload replays the same result
+idempotently; a different payload for an already-assessed question is a
+409 conflict, never a silent overwrite.
+
+## Evaluation Practice Mode
+
+Evaluation mode is separate, repeatable practice for questions whose
+_current_ main-cycle assessment is `MISSED` or `PARTIAL` - never
+`CORRECT` (rejected server-side even if the client's own bank listing is
+bypassed). It reuses the progressive-reveal mechanics above, but against
+its own state:
+
+- The bank (`getEvaluationBank`) lists eligible questions without the
+  page number, so the user cannot infer location before recalling from
+  memory. It shows the question's **immutable initial fragment**
+  (`fragmentStartWordId` + `initialWordCount`, fixed at question
+  generation) - never the fragment as extended by an `EXTEND_FRAGMENT`
+  hint during the main cycle, which would leak progress made outside this
+  practice session.
+- Reveal progress lives in its own `EvaluationSession` row
+  (`(userId, questionId)` unique), completely separate from
+  `MemorizationQuestion`'s own reveal columns - main-cycle reveal state is
+  never touched by practicing a question here.
+- Submitting an attempt (`submitEvaluationAttempt`) requires the session
+  to be fully revealed first (409 `REVEAL_INCOMPLETE` otherwise) and
+  requires integer `belCount`/`tuntunCount` >= 0, validated both
+  client-side and server-side. Every attempt becomes a new
+  `EvaluationAttempt` history row; it never changes the main-cycle
+  `QuestionAssessment`. On success the `EvaluationSession` row is deleted
+  so the next practice of the same question starts fully hidden again.
+- Idempotency is scoped per user
+  (`@@unique([userId, clientRequestId])`, a client-generated key resent
+  unchanged on retry): replaying the same key with the same payload
+  returns the original result; the same key with a different payload is a
+  409 conflict, so a double-click or network retry can never duplicate an
+  attempt or silently accept a different one under an already-used key.
+- The bank and history are both cursor-paginated on a stable
+  `(createdAt, id)` (history) or `(assessment desc, id asc)` (bank) pair,
+  never loaded in full, so pagination never skips or duplicates rows as
+  new attempts land between page fetches.

@@ -75,7 +75,85 @@ export async function computeRevealBoundary(
   return { boundaryVerseId: lastWordOnPage.verseId, totalAyahCount };
 }
 
-const revealVerseSelect = {
+/**
+ * Batched form of computeRevealBoundary for allocating an entire package
+ * (up to 4 questions) at once: 2 queries total regardless of question
+ * count, instead of up to 3 sequential queries PER question (up to 12 for
+ * a 4-question package) - the boundary-page lookup and the anchor/
+ * boundary globalOrder lookups are each done once for every question
+ * together, not once per question.
+ */
+export async function computeRevealBoundariesBulk(
+  tx: Prisma.TransactionClient | typeof prisma,
+  sources: readonly { anchorVerseId: number; primaryPageNumber: number }[]
+): Promise<{ boundaryVerseId: number; totalAyahCount: number }[]> {
+  if (sources.length === 0) return [];
+
+  const boundaryPages = [
+    ...new Set(
+      sources.map((source) =>
+        Math.min(source.primaryPageNumber + 1, productConfig.mushafPages)
+      )
+    )
+  ];
+
+  const lastWordRows = await tx.$queryRaw<
+    { pageNumber: number; verseId: number }[]
+  >(Prisma.sql`
+    SELECT DISTINCT ON (w."pageNumber") w."pageNumber", w."verseId"
+    FROM "QuranWord" w
+    WHERE w."pageNumber" IN (${Prisma.join(boundaryPages)}) AND w."charTypeName" = 'word'
+    ORDER BY w."pageNumber", w."globalOrder" DESC
+  `);
+  const boundaryVerseIdByPage = new Map(
+    lastWordRows.map((row) => [row.pageNumber, row.verseId])
+  );
+  for (const page of boundaryPages) {
+    if (!boundaryVerseIdByPage.has(page)) {
+      throw new Error(`No words found for page ${page}; run quran:sync first.`);
+    }
+  }
+
+  const neededVerseIds = [
+    ...new Set([
+      ...sources.map((source) => source.anchorVerseId),
+      ...boundaryVerseIdByPage.values()
+    ])
+  ];
+  const verseRows = await tx.quranVerse.findMany({
+    where: { id: { in: neededVerseIds } },
+    select: { id: true, globalOrder: true }
+  });
+  const globalOrderByVerseId = new Map(
+    verseRows.map((row) => [row.id, row.globalOrder])
+  );
+
+  return sources.map((source) => {
+    const boundaryPage = Math.min(
+      source.primaryPageNumber + 1,
+      productConfig.mushafPages
+    );
+    const boundaryVerseId = boundaryVerseIdByPage.get(boundaryPage)!;
+    const anchorGlobalOrder = globalOrderByVerseId.get(source.anchorVerseId);
+    const boundaryGlobalOrder = globalOrderByVerseId.get(boundaryVerseId);
+    if (anchorGlobalOrder === undefined || boundaryGlobalOrder === undefined) {
+      throw new Error(
+        "Missing verse globalOrder data while computing reveal boundary - Quran data integrity problem, not a user error."
+      );
+    }
+    if (boundaryGlobalOrder < anchorGlobalOrder) {
+      throw new Error(
+        `Reveal boundary verse (globalOrder ${boundaryGlobalOrder}) precedes anchor verse (globalOrder ${anchorGlobalOrder}) for page ${source.primaryPageNumber} - Quran data integrity problem, not a user error.`
+      );
+    }
+    return {
+      boundaryVerseId,
+      totalAyahCount: boundaryGlobalOrder - anchorGlobalOrder + 1
+    };
+  });
+}
+
+export const revealVerseSelect = {
   verseKey: true,
   textUthmani: true,
   verseNumber: true,
@@ -85,7 +163,7 @@ const revealVerseSelect = {
   chapter: { select: { nameTransliterated: true, nameArabic: true } }
 } satisfies Prisma.QuranVerseSelect;
 
-function toRevealedAyah(verse: {
+export function toRevealedAyah(verse: {
   verseKey: string;
   textUthmani: string;
   juzNumber: number;
@@ -107,7 +185,7 @@ function toRevealedAyah(verse: {
  * stores every ayah revealed so far so this only ever needs to fetch the
  * one new one, not re-fetch the whole accumulated prefix on every click.
  */
-async function nthVerseFromAnchor(
+export async function nthVerseFromAnchor(
   tx: Prisma.TransactionClient | typeof prisma,
   anchorVerseId: number,
   offset: number

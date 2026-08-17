@@ -81,6 +81,10 @@ test("hint and assessment mutation responses stay minimal and idempotent", async
   ]);
   expect(hintBody.data).not.toHaveProperty("question");
 
+  // Assessment is gated on a complete reveal (submitAssessment rejects
+  // otherwise with 409 REVEAL_INCOMPLETE) - reveal fully before grading.
+  await revealFully(request, cookie, questionId);
+
   const firstAssessment = await request.post("/api/memorization/assessment", {
     headers: { cookie },
     data: { questionId, assessment: "CORRECT" }
@@ -101,6 +105,17 @@ test("hint and assessment mutation responses stay minimal and idempotent", async
   expect(await duplicateAssessment.json()).toEqual({
     data: { questionId, assessment: "CORRECT", packageCompleted: false }
   });
+
+  // An assessment is immutable once saved: a resubmission with a
+  // DIFFERENT value must conflict, not silently overwrite graded history.
+  const conflictingAssessment = await request.post(
+    "/api/memorization/assessment",
+    {
+      headers: { cookie },
+      data: { questionId, assessment: "MISSED" }
+    }
+  );
+  expect(conflictingAssessment.status()).toBe(409);
 });
 
 test("concurrent package allocation returns one in-progress package", async ({
@@ -135,6 +150,24 @@ test("concurrent package allocation returns one in-progress package", async ({
   expect(leftBody.data.questions).toHaveLength(4);
   expect(rightBody.data.questions).toHaveLength(4);
 });
+
+async function revealFully(
+  request: APIRequestContext,
+  cookie: string,
+  questionId: string
+) {
+  let count = 0;
+  while (true) {
+    const response = await request.post("/api/memorization/reveal", {
+      headers: { cookie },
+      data: { questionId, expectedRevealedCount: count }
+    });
+    expect(response.ok()).toBe(true);
+    const body = (await response.json()) as { data: { isComplete: boolean } };
+    count += 1;
+    if (body.data.isComplete) return;
+  }
+}
 
 async function registerApiUser(
   request: APIRequestContext,

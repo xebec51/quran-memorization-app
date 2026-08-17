@@ -123,6 +123,16 @@ export type EvaluationBankItem = {
   lastAttemptAt: string | null;
 };
 
+export type EvaluationBankPage = {
+  items: EvaluationBankItem[];
+  nextCursor: string | null;
+};
+
+export type EvaluationSessionDto = RevealProgress & {
+  questionId: string;
+  fragmentText: string;
+};
+
 export type EvaluationAttemptDto = {
   id: string;
   questionId: string;
@@ -130,6 +140,15 @@ export type EvaluationAttemptDto = {
   belCount: number;
   tuntunCount: number;
   createdAt: string;
+};
+
+export type EvaluationHistoryItem = EvaluationAttemptDto & {
+  fragmentText: string;
+};
+
+export type EvaluationHistoryPage = {
+  items: EvaluationHistoryItem[];
+  nextCursor: string | null;
 };
 
 export type EvaluationHistorySummary = {

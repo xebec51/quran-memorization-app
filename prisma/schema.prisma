@@ -68,6 +68,7 @@ model User {
   hintEvents         HintEvent[]
   assessments        QuestionAssessment[]
   evaluationAttempts EvaluationAttempt[]
+  evaluationSessions EvaluationSession[]
 }
 
 model AuthRateLimit {
@@ -127,17 +128,23 @@ model QuranVerse {
   verseKey          String  @unique
   chapterId         Int
   verseNumber       Int
+  // DB-level: DEFERRABLE INITIALLY DEFERRED (checked at transaction
+  // commit, not per-row) - Prisma's schema DSL cannot express this, see
+  // migration 20260818090000_make_global_order_constraints_deferrable
+  // for why and lib/quran/sync/sync.ts for the sync transaction that
+  // relies on it.
   globalOrder       Int     @unique
   juzNumber         Int
   pageNumber        Int
   textUthmani       String
   textUthmaniSimple String?
 
-  chapter                    QuranChapter           @relation(fields: [chapterId], references: [id], onDelete: Restrict)
-  page                       QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
-  words                      QuranWord[]
-  anchorForQuestions         MemorizationQuestion[] @relation("QuestionAnchorVerse")
-  revealBoundaryForQuestions MemorizationQuestion[] @relation("QuestionRevealBoundaryVerse")
+  chapter                             QuranChapter           @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  page                                QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  words                               QuranWord[]
+  anchorForQuestions                  MemorizationQuestion[] @relation("QuestionAnchorVerse")
+  revealBoundaryForQuestions          MemorizationQuestion[] @relation("QuestionRevealBoundaryVerse")
+  revealBoundaryForEvaluationSessions EvaluationSession[]    @relation("EvaluationSessionRevealBoundaryVerse")
 
   @@unique([chapterId, verseNumber])
   @@index([pageNumber, globalOrder])
@@ -149,6 +156,8 @@ model QuranWord {
   verseId      Int
   verseKey     String
   position     Int
+  // DB-level: DEFERRABLE INITIALLY DEFERRED - see QuranVerse.globalOrder
+  // above and migration 20260818090000_make_global_order_constraints_deferrable.
   globalOrder  Int     @unique
   pageNumber   Int
   lineNumber   Int?
@@ -258,6 +267,7 @@ model MemorizationQuestion {
   hintEvents          HintEvent[]
   assessment          QuestionAssessment?
   evaluationAttempts  EvaluationAttempt[]
+  evaluationSessions  EvaluationSession[]
 
   @@unique([cycleId, primaryPageNumber])
   @@unique([cycleId, anchorVerseId])
@@ -310,16 +320,47 @@ model EvaluationAttempt {
   // Client-generated per-submission key. A double-click or network retry
   // of the same submission reuses this key, which lets submitEvaluationAttempt
   // recognize the duplicate via the unique constraint below and return the
-  // already-created attempt instead of creating a second row. Nullable so
+  // already-created attempt instead of creating a second row (after
+  // verifying the resubmitted payload actually matches - a reused key
+  // with a different payload is a conflict, not a replay). Nullable so
   // it stays additive against rows written before this column existed;
-  // Postgres allows any number of NULLs in a unique index.
-  clientRequestId String?          @unique
+  // Postgres allows any number of NULLs in a unique index. Scoped to
+  // (userId, clientRequestId) rather than globally unique, so the
+  // idempotency guarantee is explicitly per-user.
+  clientRequestId String?
   createdAt       DateTime         @default(now())
 
   user     User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   question MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, clientRequestId])
   @@index([userId, createdAt])
   @@index([questionId, createdAt])
   @@index([userId, result])
+}
+
+// Tracks in-progress progressive-reveal state for one (user, question)
+// evaluation practice session - deliberately separate from
+// MemorizationQuestion's own reveal columns (which belong to the main
+// 604-page cycle attempt and must never be touched by evaluation
+// practice). One row per (userId, questionId): created/reset each time
+// the user selects that question in the evaluation bank, consumed and
+// deleted when the attempt is finally submitted so the next practice of
+// the same question starts fully hidden again.
+model EvaluationSession {
+  id                    String   @id @default(cuid())
+  userId                String
+  questionId            String
+  revealedAyahCount     Int      @default(0)
+  revealBoundaryVerseId Int
+  revealTotalAyahCount  Int
+  revealedVersesJson    Json     @default("[]")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question            MemorizationQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  revealBoundaryVerse QuranVerse           @relation("EvaluationSessionRevealBoundaryVerse", fields: [revealBoundaryVerseId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, questionId])
 }

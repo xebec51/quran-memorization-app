@@ -7,7 +7,7 @@ import { measureServerTiming } from "@/lib/performance/timing";
 import { createCyclePlan } from "./cycle/plan";
 import { CryptoRandomSource, SeededRandomSource } from "./random";
 import { generateQuestionSource, nextBucket } from "./question/generator";
-import { computeRevealBoundary } from "./reveal/service";
+import { computeRevealBoundariesBulk } from "./reveal/service";
 import {
   alreadyAssessedError,
   hintLimitError,
@@ -335,7 +335,8 @@ export async function submitAssessment(
               id: true,
               packageId: true,
               revealedAyahCount: true,
-              revealTotalAyahCount: true
+              revealTotalAyahCount: true,
+              assessment: { select: { assessment: true } }
             }
           });
           if (!question) throw notFoundError();
@@ -347,10 +348,24 @@ export async function submitAssessment(
             throw revealIncompleteError();
           }
 
-          await tx.questionAssessment.upsert({
-            where: { questionId },
-            update: { assessment },
-            create: { userId, questionId, assessment },
+          // Once assessed, immutable: a retry with the SAME value is a
+          // no-op idempotent replay (double-click, network retry), but a
+          // DIFFERENT value means the caller's own record of what it
+          // submitted disagrees with what is already saved - that is a
+          // conflict, not a silent overwrite of graded history.
+          if (question.assessment) {
+            if (question.assessment.assessment === assessment) {
+              const packageCompleted = await completePackageIfReady(
+                tx,
+                question.packageId
+              );
+              return { questionId, assessment, packageCompleted };
+            }
+            throw alreadyAssessedError();
+          }
+
+          await tx.questionAssessment.create({
+            data: { userId, questionId, assessment },
             select: { id: true }
           });
           await tx.memorizationQuestion.update({
@@ -475,20 +490,10 @@ async function allocatePackage(
       });
     });
 
-    // Sequential, not Promise.all: `tx` is a single interactive-transaction
-    // client bound to one reserved connection, and Prisma does not support
-    // concurrent queries against it (risks P2028 "transaction already
-    // closed" under load) - see the matching fix in reveal/service.ts.
-    const boundaries: Awaited<ReturnType<typeof computeRevealBoundary>>[] = [];
-    for (const source of sources) {
-      boundaries.push(
-        await computeRevealBoundary(
-          tx,
-          source.anchorVerseId,
-          source.primaryPageNumber
-        )
-      );
-    }
+    // One batched call (2 queries total) instead of looping a
+    // per-question lookup (up to 3 queries each, up to 12 for a
+    // 4-question package) - see computeRevealBoundariesBulk.
+    const boundaries = await computeRevealBoundariesBulk(tx, sources);
 
     const questionRows: GeneratedQuestionRow[] = sources.map(
       (source, index) => ({

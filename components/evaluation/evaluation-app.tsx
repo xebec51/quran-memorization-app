@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import {
   AlarmClock,
   CheckCircle2,
+  Eye,
   History,
   ListChecks,
   Repeat
@@ -21,6 +22,28 @@ type BankItem = {
   lastAttemptAt: string | null;
 };
 
+type BankPage = {
+  items: BankItem[];
+  nextCursor: string | null;
+};
+
+type RevealedAyah = {
+  verseKey: string;
+  text: string;
+  surah: string;
+  juz: number;
+  page: number;
+};
+
+type SessionDto = {
+  questionId: string;
+  fragmentText: string;
+  revealedAyahCount: number;
+  totalAyahCount: number;
+  isComplete: boolean;
+  verses: RevealedAyah[];
+};
+
 type AttemptDto = {
   id: string;
   questionId: string;
@@ -30,8 +53,10 @@ type AttemptDto = {
   createdAt: string;
 };
 
+type HistoryItem = AttemptDto & { fragmentText: string };
+
 type HistoryPage = {
-  items: AttemptDto[];
+  items: HistoryItem[];
   nextCursor: string | null;
 };
 
@@ -47,37 +72,75 @@ export function EvaluationApp({
   initialHistory,
   initialSummary
 }: {
-  initialBank: BankItem[];
+  initialBank: BankPage;
   initialHistory: HistoryPage;
   initialSummary: Summary;
 }) {
-  const [bank] = useState(initialBank);
+  const [bank, setBank] = useState(initialBank);
   const [history, setHistory] = useState(initialHistory);
   const [summary, setSummary] = useState(initialSummary);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionDto | null>(null);
   const [belCount, setBelCount] = useState("0");
   const [tuntunCount, setTuntunCount] = useState("0");
-  const [pending, setPending] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [revealPending, setRevealPending] = useState(false);
+  const [submitPending, setSubmitPending] = useState(false);
+  const [loadingMoreBank, setLoadingMoreBank] = useState(false);
+  const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
+  const revealLockRef = useRef(false);
   // One key per selected question, reused across retries of the same
   // submission (double-click, dropped response) so the server can dedupe -
   // see submitEvaluationAttempt. A fresh key is only drawn on selection.
   const attemptKeyRef = useRef<string>(crypto.randomUUID());
 
-  const selected = bank.find((item) => item.questionId === selectedId) ?? null;
-
-  function selectQuestion(item: BankItem) {
+  async function selectQuestion(item: BankItem) {
     setSelectedId(item.questionId);
+    setSession(null);
     setBelCount("0");
     setTuntunCount("0");
     setError(null);
     attemptKeyRef.current = crypto.randomUUID();
+    setSessionLoading(true);
+    try {
+      const data = await apiFetch<SessionDto>("/api/evaluation/session", {
+        questionId: item.questionId
+      });
+      setSession(data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Gagal memuat sesi latihan."
+      );
+      setSelectedId(null);
+    } finally {
+      setSessionLoading(false);
+    }
+  }
+
+  async function revealNext() {
+    if (!session || revealLockRef.current || session.isComplete) return;
+    revealLockRef.current = true;
+    setRevealPending(true);
+    try {
+      const data = await apiFetch<SessionDto>("/api/evaluation/reveal", {
+        questionId: session.questionId,
+        expectedRevealedCount: session.revealedAyahCount
+      });
+      setSession(data);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Gagal membuka ayat berikutnya."
+      );
+    } finally {
+      revealLockRef.current = false;
+      setRevealPending(false);
+    }
   }
 
   async function submitAttempt(result: Assessment) {
-    if (!selected || submitLockRef.current) return;
+    if (!session || !session.isComplete || submitLockRef.current) return;
     const parsedBel = Number.parseInt(belCount, 10);
     const parsedTuntun = Number.parseInt(tuntunCount, 10);
     if (!Number.isInteger(parsedBel) || parsedBel < 0) {
@@ -89,11 +152,11 @@ export function EvaluationApp({
       return;
     }
     submitLockRef.current = true;
-    setPending(true);
+    setSubmitPending(true);
     setError(null);
     try {
       const attempt = await apiFetch<AttemptDto>("/api/evaluation/attempt", {
-        questionId: selected.questionId,
+        questionId: session.questionId,
         result,
         belCount: parsedBel,
         tuntunCount: parsedTuntun,
@@ -107,7 +170,10 @@ export function EvaluationApp({
       );
       if (!alreadyRecorded) {
         setHistory((current) => ({
-          items: [attempt, ...current.items],
+          items: [
+            { ...attempt, fragmentText: session.fragmentText },
+            ...current.items
+          ],
           nextCursor: current.nextCursor
         }));
         setSummary((current) => ({
@@ -121,6 +187,7 @@ export function EvaluationApp({
         }));
       }
       setSelectedId(null);
+      setSession(null);
       setBelCount("0");
       setTuntunCount("0");
     } catch (err) {
@@ -131,15 +198,35 @@ export function EvaluationApp({
       );
     } finally {
       submitLockRef.current = false;
-      setPending(false);
+      setSubmitPending(false);
+    }
+  }
+
+  async function loadMoreBank() {
+    if (!bank.nextCursor || loadingMoreBank) return;
+    setLoadingMoreBank(true);
+    try {
+      const page = await apiFetch<BankPage>(
+        `/api/evaluation/bank?cursor=${encodeURIComponent(bank.nextCursor)}&limit=20`,
+        undefined,
+        { method: "GET" }
+      );
+      setBank((current) => ({
+        items: [...current.items, ...page.items],
+        nextCursor: page.nextCursor
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal memuat bank soal.");
+    } finally {
+      setLoadingMoreBank(false);
     }
   }
 
   async function loadMoreHistory() {
-    if (!history.nextCursor || loadingMore) return;
-    setLoadingMore(true);
+    if (!history.nextCursor || loadingMoreHistory) return;
+    setLoadingMoreHistory(true);
     try {
-      const page = await apiFetch<HistoryPage & { summary: Summary }>(
+      const page = await apiFetch<HistoryPage>(
         `/api/evaluation/history?cursor=${encodeURIComponent(history.nextCursor)}&limit=20`,
         undefined,
         { method: "GET" }
@@ -151,9 +238,15 @@ export function EvaluationApp({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat riwayat.");
     } finally {
-      setLoadingMore(false);
+      setLoadingMoreHistory(false);
     }
   }
+
+  const revealButtonLabel = revealPending
+    ? "Membuka..."
+    : session && session.revealedAyahCount === 0
+      ? "Lihat Ayat Pertama"
+      : "Lihat Ayat Berikutnya";
 
   return (
     <div className="grid gap-4 pb-20">
@@ -189,12 +282,14 @@ export function EvaluationApp({
       </div>
 
       {error ? (
-        <Card className="text-sm text-[var(--danger)]">{error}</Card>
+        <Card role="alert" className="text-sm text-[var(--danger)]">
+          {error}
+        </Card>
       ) : null}
 
       <Card>
-        <h2 className="font-semibold">Bank Evaluasi ({bank.length})</h2>
-        {bank.length === 0 ? (
+        <h2 className="font-semibold">Bank Evaluasi</h2>
+        {bank.items.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--muted)]">
             Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini
             setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum
@@ -202,11 +297,13 @@ export function EvaluationApp({
           </p>
         ) : (
           <div className="mt-3 grid gap-2">
-            {bank.map((item) => (
+            {bank.items.map((item) => (
               <button
                 key={item.questionId}
                 onClick={() => selectQuestion(item)}
-                className={`rounded-md border p-3 text-left text-sm transition ${
+                disabled={sessionLoading}
+                aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}`}
+                className={`rounded-md border p-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-70 ${
                   item.questionId === selectedId
                     ? "border-[var(--primary)] bg-emerald-50"
                     : "border-[var(--border)] bg-white hover:bg-slate-50"
@@ -237,69 +334,130 @@ export function EvaluationApp({
             ))}
           </div>
         )}
+        {bank.nextCursor ? (
+          <Button
+            variant="secondary"
+            className="mt-3"
+            disabled={loadingMoreBank}
+            onClick={loadMoreBank}
+          >
+            {loadingMoreBank ? "Memuat..." : "Muat lebih banyak"}
+          </Button>
+        ) : null}
       </Card>
 
-      {selected ? (
+      {selectedId && (sessionLoading || session) ? (
         <Card className="grid gap-4 tasmiq-panel-enter">
           <div>
-            <h2 className="font-semibold">Catat hasil latihan</h2>
+            <h2 className="font-semibold">Latihan ingatan</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ingat ayat berikut dari hafalan, lalu catat hasilnya.
+              Ingat ayat berikut dari hafalan, buka satu per satu untuk
+              memeriksa, lalu catat hasilnya.
             </p>
           </div>
-          <p
-            className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
-            translate="no"
-            lang="ar"
-            dir="rtl"
-          >
-            {selected.fragmentText}
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-1 text-sm font-medium">
-              Jumlah bel
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={belCount}
-                onChange={(event) => setBelCount(event.target.value)}
-                className="rounded-md border border-[var(--border)] px-3 py-2"
-              />
-            </label>
-            <label className="grid gap-1 text-sm font-medium">
-              Jumlah tuntun
-              <input
-                type="number"
-                min={0}
-                step={1}
-                inputMode="numeric"
-                value={tuntunCount}
-                onChange={(event) => setTuntunCount(event.target.value)}
-                className="rounded-md border border-[var(--border)] px-3 py-2"
-              />
-            </label>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-3">
-            <Button disabled={pending} onClick={() => submitAttempt("CORRECT")}>
-              <CheckCircle2 aria-hidden className="h-4 w-4" /> Benar
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={pending}
-              onClick={() => submitAttempt("PARTIAL")}
-            >
-              Sebagian benar
-            </Button>
-            <Button
-              variant="danger"
-              disabled={pending}
-              onClick={() => submitAttempt("MISSED")}
-            >
-              Belum ingat
-            </Button>
-          </div>
+          {sessionLoading || !session ? (
+            <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
+          ) : (
+            <>
+              <p
+                className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
+                translate="no"
+                lang="ar"
+                dir="rtl"
+              >
+                {session.fragmentText}
+                <span aria-hidden className="text-[var(--accent)]">
+                  {" "}
+                  ...
+                </span>
+              </p>
+
+              {!session.isComplete ? (
+                <Button onClick={revealNext} disabled={revealPending}>
+                  <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
+                </Button>
+              ) : null}
+
+              {session.verses.length > 0 ? (
+                <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+                  <p className="text-sm text-[var(--muted)]">
+                    Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                    terbuka
+                    {session.isComplete ? " - halaman ini selesai" : ""}
+                  </p>
+                  {session.verses.map((verse) => (
+                    <div key={verse.verseKey} className="grid gap-1">
+                      <p className="text-xs text-[var(--muted)]">
+                        {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
+                        Halaman {verse.page}
+                      </p>
+                      <p
+                        className="quran-text text-right text-3xl"
+                        translate="no"
+                        lang="ar"
+                        dir="rtl"
+                      >
+                        {verse.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {session.isComplete ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="grid gap-1 text-sm font-medium">
+                      Jumlah bel
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        inputMode="numeric"
+                        value={belCount}
+                        onChange={(event) => setBelCount(event.target.value)}
+                        className="rounded-md border border-[var(--border)] px-3 py-2"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-sm font-medium">
+                      Jumlah tuntun
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        inputMode="numeric"
+                        value={tuntunCount}
+                        onChange={(event) => setTuntunCount(event.target.value)}
+                        className="rounded-md border border-[var(--border)] px-3 py-2"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    <Button
+                      disabled={submitPending}
+                      onClick={() => submitAttempt("CORRECT")}
+                    >
+                      <CheckCircle2 aria-hidden className="h-4 w-4" /> Benar
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={submitPending}
+                      onClick={() => submitAttempt("PARTIAL")}
+                    >
+                      Sebagian benar
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={submitPending}
+                      onClick={() => submitAttempt("MISSED")}
+                    >
+                      Belum ingat
+                    </Button>
+                  </div>
+                </>
+              ) : null}
+            </>
+          )}
         </Card>
       ) : null}
 
@@ -327,6 +485,14 @@ export function EvaluationApp({
                     {new Date(attempt.createdAt).toLocaleString("id-ID")}
                   </span>
                 </div>
+                <p
+                  className="quran-text mt-1 text-right text-base"
+                  translate="no"
+                  lang="ar"
+                  dir="rtl"
+                >
+                  {attempt.fragmentText}
+                </p>
                 <p className="mt-1 text-xs text-[var(--muted)]">
                   Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}
                 </p>
@@ -338,10 +504,10 @@ export function EvaluationApp({
           <Button
             variant="secondary"
             className="mt-3"
-            disabled={loadingMore}
+            disabled={loadingMoreHistory}
             onClick={loadMoreHistory}
           >
-            {loadingMore ? "Memuat..." : "Muat lebih banyak"}
+            {loadingMoreHistory ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}
       </Card>
