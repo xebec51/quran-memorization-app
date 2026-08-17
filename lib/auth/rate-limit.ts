@@ -1,4 +1,6 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 const WINDOW_MS = 10 * 60 * 1000;
@@ -21,36 +23,46 @@ export class RateLimitedError extends Error {
   }
 }
 
-export async function checkRateLimit(key: string, maxAttempts: number) {
-  const record = await prisma.authRateLimit.findUnique({ where: { key } });
-  if (!record) return;
-  const elapsedMs = Date.now() - record.windowStart.getTime();
-  if (elapsedMs >= WINDOW_MS) return;
-  if (record.attemptCount >= maxAttempts) {
-    throw new RateLimitedError(Math.ceil((WINDOW_MS - elapsedMs) / 1000));
-  }
-}
+/**
+ * Atomically increments the attempt counter for `key` and enforces
+ * `maxAttempts` within a rolling WINDOW_MS window, in one round trip.
+ *
+ * The window-expired-reset-vs-increment decision happens inside the same
+ * INSERT ... ON CONFLICT statement, serialized by Postgres's row lock on
+ * the upserted row - so two concurrent requests against the same key can
+ * never both read a pre-increment count (the check-then-increment race
+ * that let bursts bypass the limit) and can never both decide "window
+ * expired, reset to 1" independently (the race that silently lost an
+ * attempt at each window boundary). Every attempt against `key` - not just
+ * failures - counts toward the limit, so the limit is enforced *before*
+ * any expensive work (e.g. password verification) runs for that request.
+ */
+export async function checkAndRecordAttempt(key: string, maxAttempts: number) {
+  const [row] = await prisma.$queryRaw<
+    { attemptCount: number; windowStart: Date }[]
+  >(Prisma.sql`
+    INSERT INTO "AuthRateLimit" ("id", "key", "windowStart", "attemptCount", "updatedAt")
+    VALUES (${randomUUID()}, ${key}, now(), 1, now())
+    ON CONFLICT ("key") DO UPDATE SET
+      "windowStart" = CASE
+        WHEN "AuthRateLimit"."windowStart" <= now() - (${WINDOW_MS} * interval '1 millisecond')
+        THEN now()
+        ELSE "AuthRateLimit"."windowStart"
+      END,
+      "attemptCount" = CASE
+        WHEN "AuthRateLimit"."windowStart" <= now() - (${WINDOW_MS} * interval '1 millisecond')
+        THEN 1
+        ELSE "AuthRateLimit"."attemptCount" + 1
+      END,
+      "updatedAt" = now()
+    RETURNING "attemptCount", "windowStart"
+  `);
 
-export async function recordAttempt(key: string) {
-  const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    const record = await tx.authRateLimit.findUnique({ where: { key } });
-    const elapsedMs = record
-      ? now.getTime() - record.windowStart.getTime()
-      : Infinity;
-    if (!record || elapsedMs >= WINDOW_MS) {
-      await tx.authRateLimit.upsert({
-        where: { key },
-        update: { windowStart: now, attemptCount: 1 },
-        create: { key, windowStart: now, attemptCount: 1 }
-      });
-      return;
-    }
-    await tx.authRateLimit.update({
-      where: { key },
-      data: { attemptCount: { increment: 1 } }
-    });
-  });
+  if (row.attemptCount > maxAttempts) {
+    const elapsedMs = Date.now() - row.windowStart.getTime();
+    const retryAfterSeconds = Math.max(1, Math.ceil((WINDOW_MS - elapsedMs) / 1000));
+    throw new RateLimitedError(retryAfterSeconds);
+  }
 }
 
 export function clientIp(request: Request) {

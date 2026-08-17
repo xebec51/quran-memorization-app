@@ -7,11 +7,7 @@ import {
 } from "@/lib/auth/session";
 import { credentialsSchema, verifyPassword } from "@/lib/auth/password";
 import { authFormErrorCode } from "@/lib/auth/form-error";
-import {
-  LOGIN_MAX_ATTEMPTS,
-  checkRateLimit,
-  recordAttempt
-} from "@/lib/auth/rate-limit";
+import { LOGIN_MAX_ATTEMPTS, checkAndRecordAttempt } from "@/lib/auth/rate-limit";
 import { normalizeEmail } from "@/lib/utils";
 import { jsonError, jsonOk, routeError } from "@/lib/validation/api";
 
@@ -27,11 +23,10 @@ export async function POST(request: Request) {
           .parse(Object.fromEntries(await request.formData()));
     const email = normalizeEmail(input.email);
     const rateLimitKey = `login:${email}`;
-    await checkRateLimit(rateLimitKey, LOGIN_MAX_ATTEMPTS);
+    await checkAndRecordAttempt(rateLimitKey, LOGIN_MAX_ATTEMPTS);
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !(await verifyPassword(input.password, user.passwordHash))) {
-      await recordAttempt(rateLimitKey);
       if (isJson) {
         return jsonError(
           "INVALID_CREDENTIALS",
