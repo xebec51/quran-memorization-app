@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { apiFetch } from "@/lib/client/api";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 
@@ -40,21 +41,6 @@ type Summary = {
   totalTuntunCount: number;
   resultCounts: Record<Assessment, number>;
 };
-
-async function api<T>(url: string, body?: unknown): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body ?? {})
-  });
-  const json = (await response.json()) as {
-    data?: T;
-    error?: { message: string };
-  };
-  if (!response.ok || !json.data)
-    throw new Error(json.error?.message ?? "Permintaan gagal.");
-  return json.data;
-}
 
 export function EvaluationApp({
   initialBank,
@@ -106,7 +92,7 @@ export function EvaluationApp({
     setPending(true);
     setError(null);
     try {
-      const attempt = await api<AttemptDto>("/api/evaluation/attempt", {
+      const attempt = await apiFetch<AttemptDto>("/api/evaluation/attempt", {
         questionId: selected.questionId,
         result,
         belCount: parsedBel,
@@ -151,18 +137,14 @@ export function EvaluationApp({
     if (!history.nextCursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const response = await fetch(
-        `/api/evaluation/history?cursor=${encodeURIComponent(history.nextCursor)}&limit=20`
+      const page = await apiFetch<HistoryPage & { summary: Summary }>(
+        `/api/evaluation/history?cursor=${encodeURIComponent(history.nextCursor)}&limit=20`,
+        undefined,
+        { method: "GET" }
       );
-      const json = (await response.json()) as {
-        data?: HistoryPage & { summary: Summary };
-        error?: { message: string };
-      };
-      if (!response.ok || !json.data)
-        throw new Error(json.error?.message ?? "Gagal memuat riwayat.");
       setHistory((current) => ({
-        items: [...current.items, ...json.data!.items],
-        nextCursor: json.data!.nextCursor
+        items: [...current.items, ...page.items],
+        nextCursor: page.nextCursor
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat riwayat.");

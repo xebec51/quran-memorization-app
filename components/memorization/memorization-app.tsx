@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { productConfig } from "@/lib/config";
+import { apiFetch } from "@/lib/client/api";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 
@@ -116,26 +117,6 @@ export function MemorizationApp({
     question && !questionActionsBusy && !questionComplete && !packageComplete
   );
 
-  async function api<T>(
-    url: string,
-    body?: unknown,
-    options: { keepalive?: boolean } = {}
-  ): Promise<T> {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body ?? {}),
-      keepalive: options.keepalive
-    });
-    const json = (await response.json()) as {
-      data?: T;
-      error?: { message: string };
-    };
-    if (!response.ok || !json.data)
-      throw new Error(json.error?.message ?? "Permintaan gagal.");
-    return json.data;
-  }
-
   function beginAction(action: Exclude<PendingAction, null>) {
     if (actionLockRef.current) return false;
     actionLockRef.current = true;
@@ -152,7 +133,7 @@ export function MemorizationApp({
   async function loadPackage() {
     if (pendingAssessmentCount > 0 || !beginAction("package")) return;
     try {
-      const data = await api<PackageDto>("/api/memorization/next-package");
+      const data = await apiFetch<PackageDto>("/api/memorization/next-package");
       setPkg(data);
       setActiveIndex(firstActiveIndex(data));
     } catch (err) {
@@ -165,7 +146,7 @@ export function MemorizationApp({
   async function requestHint(type: string) {
     if (!question || !beginAction(`hint:${type}`)) return;
     try {
-      const data = await api<HintMutation>("/api/memorization/hint", {
+      const data = await apiFetch<HintMutation>("/api/memorization/hint", {
         questionId: question.id,
         type
       });
@@ -208,7 +189,7 @@ export function MemorizationApp({
     if (!beginAction("reveal")) return;
     const expectedRevealedCount = question.reveal.revealedAyahCount;
     try {
-      const data = await api<RevealMutation>("/api/memorization/reveal", {
+      const data = await apiFetch<RevealMutation>("/api/memorization/reveal", {
         questionId: question.id,
         expectedRevealedCount
       });
@@ -281,7 +262,7 @@ export function MemorizationApp({
     }
 
     try {
-      const data = await api<AssessmentMutation>(
+      const data = await apiFetch<AssessmentMutation>(
         "/api/memorization/assessment",
         {
           questionId: assessedQuestion.id,
