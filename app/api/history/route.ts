@@ -1,51 +1,26 @@
+import { z } from "zod";
 import { requireUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/db/prisma";
+import { getPackageHistory } from "@/lib/memorization/history/service";
+import { withServerTiming } from "@/lib/performance/timing";
 import { jsonOk, routeError } from "@/lib/validation/api";
 
-export async function GET() {
-  try {
-    const user = await requireUser();
-    const packages = await prisma.memorizationPackage.findMany({
-      where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-      select: {
-        id: true,
-        packageNumber: true,
-        state: true,
-        createdAt: true,
-        completedAt: true,
-        cycle: { select: { cycleNumber: true } },
-        questions: {
-          orderBy: { orderInPackage: "asc" },
-          select: {
-            id: true,
-            orderInPackage: true,
-            answerRevealedAt: true,
-            assessment: { select: { assessment: true } },
-            _count: { select: { hintEvents: true } }
-          }
-        }
-      }
-    });
-    return jsonOk(
-      packages.map((pkg) => ({
-        id: pkg.id,
-        cycleNumber: pkg.cycle.cycleNumber,
-        packageNumber: pkg.packageNumber,
-        state: pkg.state,
-        createdAt: pkg.createdAt,
-        completedAt: pkg.completedAt,
-        questions: pkg.questions.map((question) => ({
-          id: question.id,
-          order: question.orderInPackage,
-          answerRevealed: Boolean(question.answerRevealedAt),
-          hints: question._count.hintEvents,
-          assessment: question.assessment?.assessment ?? null
-        }))
-      }))
-    );
-  } catch (error) {
-    return routeError(error);
-  }
+const schema = z.object({
+  cursor: z.string().min(1).nullable().default(null),
+  limit: z.coerce.number().int().min(1).max(50).default(20)
+});
+
+export async function GET(request: Request) {
+  return withServerTiming(async () => {
+    try {
+      const user = await requireUser();
+      const { searchParams } = new URL(request.url);
+      const input = schema.parse({
+        cursor: searchParams.get("cursor"),
+        limit: searchParams.get("limit") ?? undefined
+      });
+      return jsonOk(await getPackageHistory(user.id, input.cursor, input.limit));
+    } catch (error) {
+      return routeError(error);
+    }
+  });
 }

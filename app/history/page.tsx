@@ -1,12 +1,18 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth/session";
-import { prisma } from "@/lib/db/prisma";
+import { getPackageHistory } from "@/lib/memorization/history/service";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
-export default async function HistoryPage() {
+const PAGE_SIZE = 20;
+
+export default async function HistoryPage({
+  searchParams
+}: {
+  searchParams: Promise<{ cursor?: string }>;
+}) {
   const user = await getCurrentUser();
   if (!user) {
     return (
@@ -18,35 +24,19 @@ export default async function HistoryPage() {
       </Card>
     );
   }
-  const packages = await prisma.memorizationPackage.findMany({
-    where: { userId: user.id },
-    orderBy: { createdAt: "desc" },
-    take: 30,
-    select: {
-      id: true,
-      packageNumber: true,
-      state: true,
-      cycle: { select: { cycleNumber: true } },
-      questions: {
-        orderBy: { orderInPackage: "asc" },
-        select: {
-          id: true,
-          orderInPackage: true,
-          assessment: { select: { assessment: true } },
-          _count: { select: { hintEvents: true } }
-        }
-      }
-    }
-  });
+
+  const { cursor } = await searchParams;
+  const history = await getPackageHistory(user.id, cursor ?? null, PAGE_SIZE);
+
   return (
     <div className="grid gap-4 pb-20">
       <h1 className="text-2xl font-semibold">Riwayat Latihan</h1>
-      {packages.length === 0 ? <Card>Belum ada riwayat latihan.</Card> : null}
-      {packages.map((pkg) => (
+      {history.items.length === 0 ? <Card>Belum ada riwayat latihan.</Card> : null}
+      {history.items.map((pkg) => (
         <Card key={pkg.id}>
           <div className="flex flex-wrap justify-between gap-2">
             <h2 className="font-semibold">
-              Siklus {pkg.cycle.cycleNumber} - Paket {pkg.packageNumber}
+              Siklus {pkg.cycleNumber} - Paket {pkg.packageNumber}
             </h2>
             <span className="text-sm text-[var(--muted)]">
               {pkg.state === "COMPLETED" ? "Selesai" : "Berjalan"}
@@ -58,16 +48,21 @@ export default async function HistoryPage() {
                 key={question.id}
                 className="rounded-md bg-slate-50 p-3 text-sm"
               >
-                Soal {question.orderInPackage}:{" "}
+                Soal {question.order}:{" "}
                 {question.assessment
-                  ? assessmentLabel(question.assessment.assessment)
+                  ? assessmentLabel(question.assessment)
                   : "Belum dinilai"}{" "}
-                - {question._count.hintEvents} petunjuk
+                - {question.hints} petunjuk
               </div>
             ))}
           </div>
         </Card>
       ))}
+      {history.nextCursor ? (
+        <Link href={`/history?cursor=${encodeURIComponent(history.nextCursor)}`}>
+          <Button variant="secondary">Muat lebih banyak</Button>
+        </Link>
+      ) : null}
     </div>
   );
 }
