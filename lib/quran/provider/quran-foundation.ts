@@ -1,6 +1,6 @@
 import { createServerClient } from "@quranjs/api/server";
 import type { PageNumber, Verse } from "@quranjs/api";
-import { getServerEnv } from "@/lib/config";
+import { getServerEnv } from "@/lib/server-env";
 import type { ProviderChapter, ProviderVerse, QuranProvider } from "./types";
 
 export class QuranFoundationProvider implements QuranProvider {
