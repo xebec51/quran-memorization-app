@@ -70,6 +70,7 @@ export async function syncQuranData(provider: QuranProvider) {
       Awaited<ReturnType<QuranProvider["getVersesByPage"]>>[number]["words"][number] & {
         verseId: number;
         chapterId: number;
+        verseNumber: number;
         juzNumber: number;
       }
     >();
@@ -84,14 +85,24 @@ export async function syncQuranData(provider: QuranProvider) {
             ...word,
             verseId: verse.id,
             chapterId: verse.chapterId,
+            verseNumber: verse.verseNumber,
             juzNumber: verse.juzNumber
           });
         }
       }
     }
 
+    // Verse ids from the provider are already globally sequential in
+    // canonical Quran order (verified against (chapterId, verseNumber)),
+    // so sorting by id is safe. Word ids are NOT: they reset/are not
+    // monotonic across at least 113 of the 114 surah boundaries, which
+    // corrupted word-level globalOrder (and therefore page-boundary
+    // reasoning) for any page that ends one surah and starts the next.
+    // Sort by the word's true canonical position instead.
     const verses = [...verseById.values()].sort((a, b) => a.id - b.id);
-    const words = [...wordById.values()].sort((a, b) => a.id - b.id);
+    const words = [...wordById.values()].sort(
+      (a, b) => a.chapterId - b.chapterId || a.verseNumber - b.verseNumber || a.position - b.position
+    );
     for (const [index, word] of words.entries()) {
       const list = pageWords.get(word.pageNumber) ?? [];
       list.push({ juzNumber: word.juzNumber, globalOrder: index + 1 });
@@ -163,8 +174,22 @@ export async function syncQuranData(provider: QuranProvider) {
       async (tx) => {
         await upsertChapters(tx, chapterRows);
         await upsertPages(tx, pageRows);
+        // globalOrder carries a UNIQUE constraint used for sequential
+        // "next verse/word" lookups. Reassigning it in bulk via UPSERT can
+        // transiently collide mid-batch (row A takes the value row B is
+        // about to vacate) even though the final state is fully unique -
+        // Postgres checks UNIQUE per row, not once at statement/transaction
+        // end. Drop and recreate the indexes around the reorder so
+        // uniqueness is only enforced against the final, consistent state;
+        // if the final state is somehow NOT unique, CREATE UNIQUE INDEX
+        // fails and the whole transaction rolls back, so this cannot mask
+        // a genuine data problem.
+        await tx.$executeRaw`DROP INDEX "QuranVerse_globalOrder_key"`;
+        await tx.$executeRaw`DROP INDEX "QuranWord_globalOrder_key"`;
         await upsertVerses(tx, verseRows);
         await upsertWords(tx, wordRows);
+        await tx.$executeRaw`CREATE UNIQUE INDEX "QuranVerse_globalOrder_key" ON "QuranVerse"("globalOrder")`;
+        await tx.$executeRaw`CREATE UNIQUE INDEX "QuranWord_globalOrder_key" ON "QuranWord"("globalOrder")`;
       },
       { timeout: 300_000, maxWait: 30_000 }
     );
