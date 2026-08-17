@@ -17,6 +17,7 @@
     "test:e2e": "playwright test",
     "quran:sync": "tsx scripts/sync-quran.ts",
     "quran:validate": "tsx scripts/validate-quran-data.ts",
+    "quran:validate-anchors": "tsx scripts/validate-question-anchors.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",

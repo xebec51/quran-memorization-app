@@ -133,9 +133,11 @@ model QuranVerse {
   textUthmani       String
   textUthmaniSimple String?
 
-  chapter QuranChapter @relation(fields: [chapterId], references: [id], onDelete: Restrict)
-  page    QuranPage    @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
-  words   QuranWord[]
+  chapter                    QuranChapter           @relation(fields: [chapterId], references: [id], onDelete: Restrict)
+  page                       QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  words                      QuranWord[]
+  anchorForQuestions         MemorizationQuestion[] @relation("QuestionAnchorVerse")
+  revealBoundaryForQuestions MemorizationQuestion[] @relation("QuestionRevealBoundaryVerse")
 
   @@unique([chapterId, verseNumber])
   @@index([pageNumber, globalOrder])
@@ -154,8 +156,9 @@ model QuranWord {
   charTypeName String
   location     String?
 
-  verse QuranVerse @relation(fields: [verseId], references: [id], onDelete: Cascade)
-  page  QuranPage  @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  verse                     QuranVerse             @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  page                      QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  fragmentStartForQuestions MemorizationQuestion[] @relation("QuestionFragmentStartWord")
 
   @@unique([verseId, position])
   @@index([pageNumber, globalOrder])
@@ -245,15 +248,19 @@ model MemorizationQuestion {
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cycle              MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  package            MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  primaryPage        QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
-  hintEvents         HintEvent[]
-  assessment         QuestionAssessment?
-  evaluationAttempts EvaluationAttempt[]
+  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle               MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  package             MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  primaryPage         QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
+  anchorVerse         QuranVerse          @relation("QuestionAnchorVerse", fields: [anchorVerseId], references: [id], onDelete: Restrict)
+  fragmentStartWord   QuranWord           @relation("QuestionFragmentStartWord", fields: [fragmentStartWordId], references: [id], onDelete: Restrict)
+  revealBoundaryVerse QuranVerse          @relation("QuestionRevealBoundaryVerse", fields: [revealBoundaryVerseId], references: [id], onDelete: Restrict)
+  hintEvents          HintEvent[]
+  assessment          QuestionAssessment?
+  evaluationAttempts  EvaluationAttempt[]
 
   @@unique([cycleId, primaryPageNumber])
+  @@unique([cycleId, anchorVerseId])
   @@unique([packageId, orderInPackage])
   @@index([userId, createdAt])
   @@index([userId, juzBand])
