@@ -1,16 +1,24 @@
 import { createServerClient } from "@quranjs/api/server";
 import type { PageNumber, Verse } from "@quranjs/api";
-import { getServerEnv } from "@/lib/server-env";
 import type { ProviderChapter, ProviderVerse, QuranProvider } from "./types";
 
+/**
+ * Only ever instantiated by scripts/sync-quran.ts, run standalone via tsx -
+ * never by the Next.js app runtime. It deliberately reads process.env
+ * directly instead of the server-only-guarded getServerEnv(): the
+ * "server-only" package throws outside a Next.js bundler context, which
+ * would break this exact script.
+ */
 export class QuranFoundationProvider implements QuranProvider {
-  private env = getServerEnv();
+  private clientId = process.env.QF_CLIENT_ID ?? "";
+  private clientSecret = process.env.QF_CLIENT_SECRET ?? "";
+  private qfEnv = process.env.QF_ENV === "production" ? "production" : "prelive";
 
   private client = createServerClient({
-    clientId: this.env.QF_CLIENT_ID ?? "",
-    clientSecret: this.env.QF_CLIENT_SECRET ?? "",
+    clientId: this.clientId,
+    clientSecret: this.clientSecret,
     services:
-      this.env.QF_ENV === "production"
+      this.qfEnv === "production"
         ? {
             tokenHost: "https://oauth2.quran.foundation",
             oauth2BaseUrl: "https://oauth2.quran.foundation",
