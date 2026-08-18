@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   AlarmClock,
   CheckCircle2,
@@ -12,6 +12,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/client/api";
+import {
+  AssessmentForm,
+  RevealSkeletonRow
+} from "@/components/memorization/assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 
@@ -67,6 +71,8 @@ type Summary = {
   resultCounts: Record<Assessment, number>;
 };
 
+type JustSaved = { result: Assessment; belCount: number; tuntunCount: number };
+
 export function EvaluationApp({
   initialBank,
   initialHistory,
@@ -81,85 +87,120 @@ export function EvaluationApp({
   const [summary, setSummary] = useState(initialSummary);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [session, setSession] = useState<SessionDto | null>(null);
-  const [belCount, setBelCount] = useState("0");
-  const [tuntunCount, setTuntunCount] = useState("0");
+  const [justSaved, setJustSaved] = useState<JustSaved | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
   const [loadingMoreBank, setLoadingMoreBank] = useState(false);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // listError covers bank/history load failures and a failed session
+  // fetch (which never reaches the point of rendering the practice
+  // card), so it renders as a page-level banner. sessionError covers
+  // reveal/submit failures, which happen while the practice card is
+  // already open - those render inside that card instead of at the top
+  // of the page, so the error sits next to the action that caused it.
+  const [listError, setListError] = useState<string | null>(null);
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
   const revealLockRef = useRef(false);
+  const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // One key per selected question, reused across retries of the same
   // submission (double-click, dropped response) so the server can dedupe -
   // see submitEvaluationAttempt. A fresh key is only drawn on selection.
   const attemptKeyRef = useRef<string>(crypto.randomUUID());
+  // The question a select/reveal/submit response is allowed to apply
+  // itself to. Updated synchronously (before any await) whenever the user
+  // switches questions, so a response that arrives after the user has
+  // since moved on - reveal/submit/select all run over the network and
+  // none of them are blocked by simply clicking a different bank item -
+  // is recognized as stale and discarded instead of overwriting the
+  // question the user is now actually looking at.
+  const activeQuestionIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
+    };
+  }, []);
 
   async function selectQuestion(item: BankItem) {
+    if (savedTimeoutRef.current) {
+      clearTimeout(savedTimeoutRef.current);
+      savedTimeoutRef.current = null;
+    }
+    // A fresh selection always wins: reset any in-flight reveal/submit
+    // lock and pending flag left over from whatever question was open
+    // before, so this question never inherits a stale busy state, and any
+    // response those older requests eventually resolve to is recognized
+    // as stale by the questionId check below instead of touching this
+    // question's UI.
+    activeQuestionIdRef.current = item.questionId;
+    revealLockRef.current = false;
+    submitLockRef.current = false;
+    setRevealPending(false);
+    setSubmitPending(false);
     setSelectedId(item.questionId);
     setSession(null);
-    setBelCount("0");
-    setTuntunCount("0");
-    setError(null);
+    setJustSaved(null);
+    setListError(null);
+    setSessionError(null);
     attemptKeyRef.current = crypto.randomUUID();
     setSessionLoading(true);
     try {
       const data = await apiFetch<SessionDto>("/api/evaluation/session", {
         questionId: item.questionId
       });
+      if (activeQuestionIdRef.current !== item.questionId) return;
       setSession(data);
     } catch (err) {
-      setError(
+      if (activeQuestionIdRef.current !== item.questionId) return;
+      setListError(
         err instanceof Error ? err.message : "Gagal memuat sesi latihan."
       );
       setSelectedId(null);
     } finally {
-      setSessionLoading(false);
+      if (activeQuestionIdRef.current === item.questionId) {
+        setSessionLoading(false);
+      }
     }
   }
 
   async function revealNext() {
     if (!session || revealLockRef.current || session.isComplete) return;
+    const questionId = session.questionId;
     revealLockRef.current = true;
     setRevealPending(true);
+    setSessionError(null);
     try {
       const data = await apiFetch<SessionDto>("/api/evaluation/reveal", {
-        questionId: session.questionId,
+        questionId,
         expectedRevealedCount: session.revealedAyahCount
       });
+      if (activeQuestionIdRef.current !== questionId) return;
       setSession(data);
     } catch (err) {
-      setError(
+      if (activeQuestionIdRef.current !== questionId) return;
+      setSessionError(
         err instanceof Error ? err.message : "Gagal membuka ayat berikutnya."
       );
     } finally {
       revealLockRef.current = false;
-      setRevealPending(false);
+      if (activeQuestionIdRef.current === questionId) setRevealPending(false);
     }
   }
 
-  async function submitAttempt(result: Assessment) {
+  async function submitAttempt(belCount: number, tuntunCount: number) {
     if (!session || !session.isComplete || submitLockRef.current) return;
-    const parsedBel = Number.parseInt(belCount, 10);
-    const parsedTuntun = Number.parseInt(tuntunCount, 10);
-    if (!Number.isInteger(parsedBel) || parsedBel < 0) {
-      setError("Jumlah bel harus bilangan bulat 0 atau lebih.");
-      return;
-    }
-    if (!Number.isInteger(parsedTuntun) || parsedTuntun < 0) {
-      setError("Jumlah tuntun harus bilangan bulat 0 atau lebih.");
-      return;
-    }
+    const questionId = session.questionId;
+    const fragmentText = session.fragmentText;
     submitLockRef.current = true;
     setSubmitPending(true);
-    setError(null);
+    setSessionError(null);
     try {
       const attempt = await apiFetch<AttemptDto>("/api/evaluation/attempt", {
-        questionId: session.questionId,
-        result,
-        belCount: parsedBel,
-        tuntunCount: parsedTuntun,
+        questionId,
+        belCount,
+        tuntunCount,
         clientRequestId: attemptKeyRef.current
       });
       // A deduped retry (server returned the attempt already created by an
@@ -170,10 +211,7 @@ export function EvaluationApp({
       );
       if (!alreadyRecorded) {
         setHistory((current) => ({
-          items: [
-            { ...attempt, fragmentText: session.fragmentText },
-            ...current.items
-          ],
+          items: [{ ...attempt, fragmentText }, ...current.items],
           nextCursor: current.nextCursor
         }));
         setSummary((current) => ({
@@ -185,25 +223,57 @@ export function EvaluationApp({
             [attempt.result]: current.resultCounts[attempt.result] + 1
           }
         }));
+        // Bank membership and lastResult are governed entirely by the
+        // question's main-cycle QuestionAssessment (see getEvaluationBank)
+        // - an evaluation attempt never touches that row, however it
+        // scores, so practicing the same question again later is always
+        // possible regardless of this attempt's result. Only
+        // lastAttemptAt (which genuinely reflects the latest evaluation
+        // attempt) is refreshed here immediately instead of waiting for
+        // the next full page load.
+        setBank((current) => ({
+          ...current,
+          items: current.items.map((item) =>
+            item.questionId === questionId
+              ? { ...item, lastAttemptAt: attempt.createdAt }
+              : item
+          )
+        }));
       }
-      setSelectedId(null);
-      setSession(null);
-      setBelCount("0");
-      setTuntunCount("0");
+      // Only show the "Tersimpan" confirmation (and schedule closing the
+      // card) if the user is still looking at the question that was just
+      // graded - if they've since switched to a different question, doing
+      // either would yank them back to, or silently close, a question
+      // they never submitted.
+      if (activeQuestionIdRef.current === questionId) {
+        setJustSaved({
+          result: attempt.result,
+          belCount: attempt.belCount,
+          tuntunCount: attempt.tuntunCount
+        });
+        savedTimeoutRef.current = setTimeout(() => {
+          setSelectedId(null);
+          setSession(null);
+          setJustSaved(null);
+        }, 1200);
+      }
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Gagal menyimpan percobaan evaluasi."
-      );
+      if (activeQuestionIdRef.current === questionId) {
+        setSessionError(
+          err instanceof Error
+            ? err.message
+            : "Gagal menyimpan percobaan evaluasi."
+        );
+      }
     } finally {
       submitLockRef.current = false;
-      setSubmitPending(false);
+      if (activeQuestionIdRef.current === questionId) setSubmitPending(false);
     }
   }
 
   async function loadMoreBank() {
     if (!bank.nextCursor || loadingMoreBank) return;
+    setListError(null);
     setLoadingMoreBank(true);
     try {
       const page = await apiFetch<BankPage>(
@@ -216,7 +286,9 @@ export function EvaluationApp({
         nextCursor: page.nextCursor
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memuat bank soal.");
+      setListError(
+        err instanceof Error ? err.message : "Gagal memuat bank soal."
+      );
     } finally {
       setLoadingMoreBank(false);
     }
@@ -224,6 +296,7 @@ export function EvaluationApp({
 
   async function loadMoreHistory() {
     if (!history.nextCursor || loadingMoreHistory) return;
+    setListError(null);
     setLoadingMoreHistory(true);
     try {
       const page = await apiFetch<HistoryPage>(
@@ -236,7 +309,9 @@ export function EvaluationApp({
         nextCursor: page.nextCursor
       }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal memuat riwayat.");
+      setListError(
+        err instanceof Error ? err.message : "Gagal memuat riwayat."
+      );
     } finally {
       setLoadingMoreHistory(false);
     }
@@ -258,32 +333,37 @@ export function EvaluationApp({
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-4">
-        <Metric
-          icon={ListChecks}
-          label="Total percobaan"
-          value={summary.totalAttempts}
-        />
-        <Metric
-          icon={AlarmClock}
-          label="Total bel"
-          value={summary.totalBelCount}
-        />
-        <Metric
-          icon={Repeat}
-          label="Total tuntun"
-          value={summary.totalTuntunCount}
-        />
-        <Metric
-          icon={CheckCircle2}
-          label="Benar"
-          value={summary.resultCounts.CORRECT}
-        />
-      </div>
+      <Card>
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 sm:divide-x sm:divide-[var(--border)]">
+          <Metric
+            icon={ListChecks}
+            label="Total percobaan"
+            value={summary.totalAttempts}
+          />
+          <Metric
+            icon={AlarmClock}
+            label="Total bel"
+            value={summary.totalBelCount}
+            className="sm:pl-4"
+          />
+          <Metric
+            icon={Repeat}
+            label="Total tuntun"
+            value={summary.totalTuntunCount}
+            className="sm:pl-4"
+          />
+          <Metric
+            icon={CheckCircle2}
+            label="Benar"
+            value={summary.resultCounts.CORRECT}
+            className="sm:pl-4"
+          />
+        </div>
+      </Card>
 
-      {error ? (
+      {listError ? (
         <Card role="alert" className="text-sm text-[var(--danger)]">
-          {error}
+          {listError}
         </Card>
       ) : null}
 
@@ -300,10 +380,15 @@ export function EvaluationApp({
             {bank.items.map((item) => (
               <button
                 key={item.questionId}
-                onClick={() => selectQuestion(item)}
-                disabled={sessionLoading}
-                aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}`}
-                className={`rounded-md border p-3 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-70 ${
+                type="button"
+                onClick={() => {
+                  if (!sessionLoading) selectQuestion(item);
+                }}
+                aria-disabled={sessionLoading || undefined}
+                aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}: ${item.fragmentText}`}
+                className={`rounded-md border p-3 text-left text-sm transition ${
+                  sessionLoading ? "pointer-events-none opacity-70" : ""
+                } ${
                   item.questionId === selectedId
                     ? "border-[var(--primary)] bg-emerald-50"
                     : "border-[var(--border)] bg-white hover:bg-slate-50"
@@ -321,6 +406,12 @@ export function EvaluationApp({
                       ? "Belum ingat"
                       : "Sebagian benar"}
                   </span>
+                  {item.lastAttemptAt ? (
+                    <span className="text-[10px] text-[var(--muted)]">
+                      Dicoba{" "}
+                      {new Date(item.lastAttemptAt).toLocaleDateString("id-ID")}
+                    </span>
+                  ) : null}
                 </div>
                 <p
                   className="quran-text text-right text-xl"
@@ -347,7 +438,7 @@ export function EvaluationApp({
       </Card>
 
       {selectedId && (sessionLoading || session) ? (
-        <Card className="grid gap-4 tasmiq-panel-enter">
+        <Card className="grid gap-4 border-l-4 border-l-[var(--primary)] tasmiq-panel-enter">
           <div>
             <h2 className="font-semibold">Latihan ingatan</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
@@ -355,8 +446,18 @@ export function EvaluationApp({
               memeriksa, lalu catat hasilnya.
             </p>
           </div>
+          {sessionError ? (
+            <p role="alert" className="text-sm text-[var(--danger)]">
+              {sessionError}
+            </p>
+          ) : null}
           {sessionLoading || !session ? (
             <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
+          ) : justSaved ? (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              Tersimpan: {resultLabel(justSaved.result)} (bel{" "}
+              {justSaved.belCount}, tuntun {justSaved.tuntunCount})
+            </div>
           ) : (
             <>
               <p
@@ -372,90 +473,57 @@ export function EvaluationApp({
                 </span>
               </p>
 
-              {!session.isComplete ? (
-                <Button onClick={revealNext} disabled={revealPending}>
-                  <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
-                </Button>
-              ) : null}
-
-              {session.verses.length > 0 ? (
-                <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
-                  <p className="text-sm text-[var(--muted)]">
+              {session.verses.length > 0 || revealPending ? (
+                <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
+                  <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
                     Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
                     terbuka
                     {session.isComplete ? " - halaman ini selesai" : ""}
                   </p>
-                  {session.verses.map((verse) => (
-                    <div key={verse.verseKey} className="grid gap-1">
-                      <p className="text-xs text-[var(--muted)]">
-                        {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
-                        Halaman {verse.page}
-                      </p>
-                      <p
-                        className="quran-text text-right text-3xl"
-                        translate="no"
-                        lang="ar"
-                        dir="rtl"
-                      >
-                        {verse.text}
-                      </p>
-                    </div>
-                  ))}
+                  <div className="grid gap-3 p-4 pt-0">
+                    {session.verses.map((verse) => (
+                      <div key={verse.verseKey} className="grid gap-1">
+                        <p className="text-xs text-[var(--muted)]">
+                          {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
+                          Halaman {verse.page}
+                        </p>
+                        <p
+                          className="quran-text text-right text-3xl"
+                          translate="no"
+                          lang="ar"
+                          dir="rtl"
+                        >
+                          {verse.text}
+                        </p>
+                      </div>
+                    ))}
+                    {revealPending ? <RevealSkeletonRow /> : null}
+                  </div>
                 </div>
-              ) : null}
+              ) : (
+                <p className="text-sm text-[var(--muted)]">
+                  Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                  terbuka
+                </p>
+              )}
 
-              {session.isComplete ? (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1 text-sm font-medium">
-                      Jumlah bel
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        inputMode="numeric"
-                        value={belCount}
-                        onChange={(event) => setBelCount(event.target.value)}
-                        className="rounded-md border border-[var(--border)] px-3 py-2"
-                      />
-                    </label>
-                    <label className="grid gap-1 text-sm font-medium">
-                      Jumlah tuntun
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        inputMode="numeric"
-                        value={tuntunCount}
-                        onChange={(event) => setTuntunCount(event.target.value)}
-                        className="rounded-md border border-[var(--border)] px-3 py-2"
-                      />
-                    </label>
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <Button
-                      disabled={submitPending}
-                      onClick={() => submitAttempt("CORRECT")}
-                    >
-                      <CheckCircle2 aria-hidden className="h-4 w-4" /> Benar
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      disabled={submitPending}
-                      onClick={() => submitAttempt("PARTIAL")}
-                    >
-                      Sebagian benar
-                    </Button>
-                    <Button
-                      variant="danger"
-                      disabled={submitPending}
-                      onClick={() => submitAttempt("MISSED")}
-                    >
-                      Belum ingat
-                    </Button>
-                  </div>
-                </>
-              ) : null}
+              {/* Below the revealed-ayat list, not above it, so the button
+                  stays anchored right after the last-opened ayah as the
+                  list grows - matches the main flow's reveal button
+                  placement (components/memorization/memorization-app.tsx). */}
+              {!session.isComplete ? (
+                <Button onClick={revealNext} disabled={revealPending}>
+                  <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
+                </Button>
+              ) : (
+                <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+                  <p className="text-sm font-medium">Evaluasi jawaban</p>
+                  <AssessmentForm
+                    onAssess={submitAttempt}
+                    pending={submitPending}
+                  />
+                </div>
+              )}
             </>
           )}
         </Card>
@@ -518,20 +586,22 @@ export function EvaluationApp({
 function Metric({
   icon: Icon,
   label,
-  value
+  value,
+  className = ""
 }: {
   icon: typeof ListChecks;
   label: string;
   value: number;
+  className?: string;
 }) {
   return (
-    <Card>
+    <div className={`grid gap-1 ${className}`}>
       <div className="flex items-center gap-2 text-[var(--muted)]">
         <Icon aria-hidden className="h-4 w-4" />
-        <p className="text-sm">{label}</p>
+        <p className="text-xs">{label}</p>
       </div>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
-    </Card>
+      <p className="text-xl font-semibold">{value}</p>
+    </div>
   );
 }
 

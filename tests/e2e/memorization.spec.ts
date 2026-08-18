@@ -100,7 +100,7 @@ test("critical memorization flow", async ({
 
   // Questions 2-4: reveal fully then submit bel/tuntun counts - 0/0
   // derives to CORRECT, anything else derives to MISSED (see
-  // lib/memorization/service.ts's deriveAssessment).
+  // lib/memorization/assessment.ts's deriveAssessment).
   await revealFully(page);
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await submitBelTuntun(page, 1, 0);

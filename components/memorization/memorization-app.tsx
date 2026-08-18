@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 import {
   BookMarked,
-  CheckCircle2,
   Eye,
   FastForward,
   Lightbulb,
@@ -13,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { productConfig } from "@/lib/config";
 import { apiFetch } from "@/lib/client/api";
+import { deriveAssessment } from "@/lib/memorization/assessment";
+import { AssessmentForm, RevealSkeletonRow } from "./assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 
@@ -286,15 +287,6 @@ export function MemorizationApp({
     } finally {
       endAction();
     }
-  }
-
-  // Zero of both is a clean pass; anything else needs re-evaluation - see
-  // the identical rule in lib/memorization/service.ts's deriveAssessment,
-  // which is the actual source of truth. This client-side copy is only
-  // for the optimistic update below; the server's derivation is what
-  // actually gets persisted.
-  function deriveAssessment(belCount: number, tuntunCount: number): Assessment {
-    return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
   }
 
   async function assess(belCount: number, tuntunCount: number) {
@@ -678,96 +670,6 @@ function QuestionPanel({
           <AssessmentForm onAssess={onAssess} />
         </div>
       ) : null}
-    </div>
-  );
-}
-
-/**
- * Shown the instant a reveal click fires (pendingAction flips
- * synchronously before the network call even starts), right where the
- * incoming ayah will render - the real content still only ever arrives
- * from the server (it cannot be shown before the server confirms it,
- * without leaking the hidden answer to the client early), but this makes
- * the click itself feel immediate instead of doing nothing until the
- * round trip resolves.
- */
-function RevealSkeletonRow() {
-  return (
-    <div className="grid animate-pulse gap-2" aria-hidden>
-      <div className="h-3 w-40 rounded bg-slate-200" />
-      <div className="ml-auto h-8 w-4/5 rounded bg-slate-200" />
-    </div>
-  );
-}
-
-/**
- * Objective MHQ-style scoring instead of a subjective three-way choice:
- * the user reports how many bel (bell rings) and tuntun (prompts) the
- * recitation needed. Zero of both derives to CORRECT server-side (see
- * lib/memorization/service.ts's deriveAssessment); anything else derives
- * to MISSED and the question becomes eligible for evaluation practice -
- * there is no separate "grade" choice to make here.
- */
-function AssessmentForm({
-  onAssess
-}: {
-  onAssess: (belCount: number, tuntunCount: number) => void;
-}) {
-  const [belCount, setBelCount] = useState("0");
-  const [tuntunCount, setTuntunCount] = useState("0");
-  const [validationError, setValidationError] = useState<string | null>(null);
-
-  function submit() {
-    const parsedBel = Number.parseInt(belCount, 10);
-    const parsedTuntun = Number.parseInt(tuntunCount, 10);
-    if (!Number.isInteger(parsedBel) || parsedBel < 0) {
-      setValidationError("Jumlah bel harus bilangan bulat 0 atau lebih.");
-      return;
-    }
-    if (!Number.isInteger(parsedTuntun) || parsedTuntun < 0) {
-      setValidationError("Jumlah tuntun harus bilangan bulat 0 atau lebih.");
-      return;
-    }
-    setValidationError(null);
-    onAssess(parsedBel, parsedTuntun);
-  }
-
-  return (
-    <div className="grid gap-3">
-      {validationError ? (
-        <p role="alert" className="text-sm text-[var(--danger)]">
-          {validationError}
-        </p>
-      ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="grid gap-1 text-sm font-medium">
-          Jumlah bel
-          <input
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={belCount}
-            onChange={(event) => setBelCount(event.target.value)}
-            className="rounded-md border border-[var(--border)] px-3 py-2"
-          />
-        </label>
-        <label className="grid gap-1 text-sm font-medium">
-          Jumlah tuntun
-          <input
-            type="number"
-            min={0}
-            step={1}
-            inputMode="numeric"
-            value={tuntunCount}
-            onChange={(event) => setTuntunCount(event.target.value)}
-            className="rounded-md border border-[var(--border)] px-3 py-2"
-          />
-        </label>
-      </div>
-      <Button onClick={submit}>
-        <CheckCircle2 aria-hidden className="h-4 w-4" /> Simpan evaluasi
-      </Button>
     </div>
   );
 }

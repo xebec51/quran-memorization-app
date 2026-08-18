@@ -111,11 +111,22 @@ async function startAndRevealEvaluationSession(
   return session;
 }
 
+/**
+ * `result` is never sent by the client - the server derives it from
+ * belCount/tuntunCount (see lib/memorization/assessment.ts's
+ * deriveAssessment, shared with the main flow's submitAssessment). This
+ * mirrors that derivation purely so tests can assert on the expected
+ * response/history `result` without hardcoding a value that could drift
+ * from the real rule.
+ */
+function deriveAssessment(belCount: number, tuntunCount: number) {
+  return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
+}
+
 async function submitAttempt(
   request: APIRequestContext,
   cookie: string,
   questionId: string,
-  result: "CORRECT" | "PARTIAL" | "MISSED",
   belCount: number,
   tuntunCount: number,
   clientRequestId = `${questionId}-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -123,10 +134,10 @@ async function submitAttempt(
   await startAndRevealEvaluationSession(request, cookie, questionId);
   const response = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
-    data: { questionId, result, belCount, tuntunCount, clientRequestId }
+    data: { questionId, belCount, tuntunCount, clientRequestId }
   });
   expect(response.ok()).toBe(true);
-  return (await response.json()).data as { id: string };
+  return (await response.json()).data as { id: string; result: string };
 }
 
 test("a MISSED question appears in the evaluation bank, prioritized over PARTIAL", async ({
@@ -242,7 +253,6 @@ test("evaluation session rejects a question whose main-cycle assessment is CORRE
     headers: { cookie },
     data: {
       questionId: questionIds.correct[0],
-      result: "CORRECT",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "correct-question-direct-attempt"
@@ -271,7 +281,6 @@ test("submitting an evaluation attempt before its reveal is complete is rejected
     headers: { cookie },
     data: {
       questionId,
-      result: "MISSED",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "incomplete-before-any-reveal"
@@ -290,7 +299,6 @@ test("submitting an evaluation attempt before its reveal is complete is rejected
     headers: { cookie },
     data: {
       questionId,
-      result: "MISSED",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "incomplete-partial-reveal"
@@ -304,7 +312,6 @@ test("submitting an evaluation attempt before its reveal is complete is rejected
     headers: { cookie },
     data: {
       questionId,
-      result: "MISSED",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "incomplete-now-complete"
@@ -322,23 +329,11 @@ test("evaluation attempts never overwrite the main-cycle assessment and are kept
   );
   const questionId = questionIds.missed[0];
 
-  const attempt1 = await submitAttempt(
-    request,
-    cookie,
-    questionId,
-    "PARTIAL",
-    2,
-    1
-  );
-  const attempt2 = await submitAttempt(
-    request,
-    cookie,
-    questionId,
-    "CORRECT",
-    0,
-    0
-  );
+  const attempt1 = await submitAttempt(request, cookie, questionId, 2, 1);
+  const attempt2 = await submitAttempt(request, cookie, questionId, 0, 0);
   expect(attempt1.id).not.toBe(attempt2.id);
+  expect(attempt1.result).toBe(deriveAssessment(2, 1));
+  expect(attempt2.result).toBe(deriveAssessment(0, 0));
 
   const historyResponse = await request.get(
     "/api/evaluation/history?limit=20",
@@ -358,7 +353,7 @@ test("evaluation attempts never overwrite the main-cycle assessment and are kept
   expect(attemptsForQuestion).toHaveLength(2);
   expect(attemptsForQuestion.map((item) => item.result).sort()).toEqual([
     "CORRECT",
-    "PARTIAL"
+    "MISSED"
   ]);
   expect(history.summary.totalAttempts).toBe(2);
   expect(history.summary.totalBelCount).toBe(2);
@@ -389,7 +384,6 @@ test("belCount and tuntunCount must be non-negative integers", async ({
     headers: { cookie },
     data: {
       questionId,
-      result: "MISSED",
       belCount: -1,
       tuntunCount: 0,
       clientRequestId: "validate-negative"
@@ -401,7 +395,6 @@ test("belCount and tuntunCount must be non-negative integers", async ({
     headers: { cookie },
     data: {
       questionId,
-      result: "MISSED",
       belCount: 1.5,
       tuntunCount: 0,
       clientRequestId: "validate-non-integer"
@@ -409,27 +402,26 @@ test("belCount and tuntunCount must be non-negative integers", async ({
   });
   expect(nonInteger.status()).toBe(422);
 
-  // result:"CORRECT" here is the practice OUTCOME the user is
-  // self-reporting, not the question's main-cycle assessment (which is
-  // MISSED) - a MISSED/PARTIAL question can legitimately be evaluated as
-  // recalled correctly this time.
+  // 0/0 derives to CORRECT server-side (see deriveAssessment) - the
+  // practice OUTCOME the user is self-reporting, not the question's
+  // main-cycle assessment (which is MISSED) - a MISSED/PARTIAL question
+  // can legitimately be evaluated as recalled correctly this time.
   const zeroIsValid = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
     data: {
       questionId,
-      result: "CORRECT",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "validate-zero"
     }
   });
   expect(zeroIsValid.ok()).toBe(true);
+  expect((await zeroIsValid.json()).data.result).toBe("CORRECT");
 
   const unknownQuestion = await request.post("/api/evaluation/attempt", {
     headers: { cookie },
     data: {
       questionId: "not-a-real-question-id",
-      result: "CORRECT",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId: "validate-unknown-question"
@@ -458,7 +450,6 @@ test("a duplicate submission (same clientRequestId) is deduped, not double-count
     request,
     cookie,
     questionId,
-    "PARTIAL",
     3,
     2,
     clientRequestId
@@ -472,7 +463,6 @@ test("a duplicate submission (same clientRequestId) is deduped, not double-count
     headers: { cookie },
     data: {
       questionId,
-      result: "PARTIAL",
       belCount: 3,
       tuntunCount: 2,
       clientRequestId
@@ -488,7 +478,6 @@ test("a duplicate submission (same clientRequestId) is deduped, not double-count
     headers: { cookie },
     data: {
       questionId,
-      result: "CORRECT",
       belCount: 0,
       tuntunCount: 0,
       clientRequestId
@@ -567,7 +556,7 @@ test("bank and history pagination are stable across pages (no skipped or duplica
 
   // Submit 3 evaluation attempts, then paginate history with a small limit.
   for (const questionId of missedIds.slice(0, 3)) {
-    await submitAttempt(request, cookie, questionId, "PARTIAL", 1, 1);
+    await submitAttempt(request, cookie, questionId, 1, 1);
   }
   const seenHistoryIds = new Set<string>();
   let historyCursor: string | null = null;

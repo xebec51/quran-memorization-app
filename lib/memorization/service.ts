@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { productConfig } from "@/lib/config";
 import { prisma } from "@/lib/db/prisma";
 import { measureServerTiming } from "@/lib/performance/timing";
+import { deriveAssessment } from "./assessment";
 import { createCyclePlan } from "./cycle/plan";
 import { CryptoRandomSource, SeededRandomSource } from "./random";
 import { generateQuestionSource, nextBucket } from "./question/generator";
@@ -24,7 +25,6 @@ import type {
   PublicHint,
   PublicQuestion,
   QuranWordRef,
-  RecallAssessment,
   RevealedAyah
 } from "./types";
 import {
@@ -318,24 +318,6 @@ export async function requestQuestionHint(
       )
     )
   );
-}
-
-/**
- * Objective MHQ-style self-assessment: the user reports how many bel
- * (bell rings for a mistake) and tuntun (prompts needed) occurred, rather
- * than picking a subjective Benar/Sebagian benar/Belum ingat label. The
- * stored `assessment` enum is derived, not chosen - zero of both means a
- * clean pass (CORRECT); any bel or tuntun means the question needs
- * further practice (MISSED) - so the evaluation bank's existing
- * `assessment IN (MISSED, PARTIAL)` eligibility filter keeps working
- * unchanged. PARTIAL is never produced by new submissions; it remains a
- * valid value only on historical rows created before this change.
- */
-function deriveAssessment(
-  belCount: number,
-  tuntunCount: number
-): RecallAssessment {
-  return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
 }
 
 export async function submitAssessment(

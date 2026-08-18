@@ -103,15 +103,17 @@ the UI - until `revealedAyahCount >= revealTotalAyahCount`.
 Self-assessment is objective MHQ-style scoring, not a subjective
 three-way choice: the user reports `belCount` (bell rings) and
 `tuntunCount` (prompts needed); the stored `assessment` enum is derived
-(`deriveAssessment` in `lib/memorization/service.ts`), not chosen -
-`belCount === 0 && tuntunCount === 0` is `CORRECT`, anything else is
-`MISSED`. `PARTIAL` is never produced by a new submission and remains a
-valid value only on historical `QuestionAssessment` rows created before
-this change (see the schema comment on that model) - those rows are
-never reinterpreted or backfilled. A saved assessment is immutable:
-resubmitting the identical `(belCount, tuntunCount)` pair replays the
-same result idempotently; a different pair for an already-assessed
-question is a 409 conflict, never a silent overwrite.
+(`deriveAssessment` in `lib/memorization/assessment.ts`, shared with
+evaluation practice mode below so the two grading paths can never
+diverge), not chosen - `belCount === 0 && tuntunCount === 0` is
+`CORRECT`, anything else is `MISSED`. `PARTIAL` is never produced by a
+new submission and remains a valid value only on historical
+`QuestionAssessment` rows created before this change (see the schema
+comment on that model) - those rows are never reinterpreted or
+backfilled. A saved assessment is immutable: resubmitting the identical
+`(belCount, tuntunCount)` pair replays the same result idempotently; a
+different pair for an already-assessed question is a 409 conflict, never
+a silent overwrite.
 
 ## Evaluation Practice Mode
 
@@ -135,10 +137,15 @@ its own state:
 - Submitting an attempt (`submitEvaluationAttempt`) requires the session
   to be fully revealed first (409 `REVEAL_INCOMPLETE` otherwise) and
   requires integer `belCount`/`tuntunCount` >= 0, validated both
-  client-side and server-side. Every attempt becomes a new
-  `EvaluationAttempt` history row; it never changes the main-cycle
-  `QuestionAssessment`. On success the `EvaluationSession` row is deleted
-  so the next practice of the same question starts fully hidden again.
+  client-side and server-side. Same objective bel/tuntun scoring as the
+  main flow: the stored `result` is derived server-side from
+  `belCount`/`tuntunCount` via the shared `deriveAssessment`
+  (`lib/memorization/assessment.ts`) - the client never sends a `result`
+  value, so a submission can never claim an outcome that contradicts its
+  own bel/tuntun counts. Every attempt becomes a new `EvaluationAttempt`
+  history row; it never changes the main-cycle `QuestionAssessment`. On
+  success the `EvaluationSession` row is deleted so the next practice of
+  the same question starts fully hidden again.
 - Idempotency is scoped per user
   (`@@unique([userId, clientRequestId])`, a client-generated key resent
   unchanged on retry): replaying the same key with the same payload

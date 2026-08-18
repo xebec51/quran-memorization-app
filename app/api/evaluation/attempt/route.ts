@@ -6,7 +6,6 @@ import { jsonOk, routeError } from "@/lib/validation/api";
 
 const schema = z.object({
   questionId: z.string().min(1),
-  result: z.enum(["CORRECT", "PARTIAL", "MISSED"]),
   belCount: z.number().int().min(0).max(1000),
   tuntunCount: z.number().int().min(0).max(1000),
   clientRequestId: z.string().min(1).max(100)
@@ -21,7 +20,6 @@ export async function POST(request: Request) {
         await submitEvaluationAttempt(
           user.id,
           input.questionId,
-          input.result,
           input.belCount,
           input.tuntunCount,
           input.clientRequestId

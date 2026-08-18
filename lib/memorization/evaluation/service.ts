@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
+import { deriveAssessment } from "../assessment";
 import {
   evaluationAttemptConflictError,
   evaluationNotEligibleError,
@@ -339,6 +340,11 @@ function payloadMatches(
  * would mean the caller's own record of what it submitted disagrees with
  * what actually got saved.
  *
+ * `result` is derived from belCount/tuntunCount via the shared
+ * deriveAssessment (same as the main flow's submitAssessment) - never
+ * accepted as client input, so a client cannot submit a bel/tuntun count
+ * that contradicts the recorded result.
+ *
  * Requires the question's latest main-cycle assessment to be MISSED or
  * PARTIAL (never CORRECT - checked here independently of the bank
  * listing, which a client could bypass) and its EvaluationSession to be
@@ -349,11 +355,11 @@ function payloadMatches(
 export async function submitEvaluationAttempt(
   userId: string,
   questionId: string,
-  result: RecallAssessment,
   belCount: number,
   tuntunCount: number,
   clientRequestId: string
 ): Promise<EvaluationAttemptDto> {
+  const result = deriveAssessment(belCount, tuntunCount);
   return measureServerTiming("evaluation_attempt_submit", () =>
     retrySerialization(() =>
       prisma.$transaction(
