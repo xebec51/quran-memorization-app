@@ -236,6 +236,58 @@ export async function nthVerseFromAnchor(
 }
 
 /**
+ * Every remaining verse from `offset` through `offset + limit - 1` after
+ * the anchor, in canonical order, in one round trip - the bulk sibling of
+ * nthVerseFromAnchor. Used only for revealing the rest of a question at
+ * once (see revealAllRemainingAyahs): fetching N verses one at a time
+ * would cost N round trips against Neon for no reason, since the caller
+ * already wants every one of them.
+ */
+async function versesFromAnchor(
+  tx: Prisma.TransactionClient | typeof prisma,
+  anchorVerseId: number,
+  offset: number,
+  limit: number
+): Promise<RevealedAyah[]> {
+  const rows = await tx.$queryRaw<
+    {
+      verseKey: string;
+      textUthmani: string;
+      verseNumber: number;
+      juzNumber: number;
+      pageNumber: number;
+      globalOrder: number;
+      chapterNameTransliterated: string;
+      chapterNameArabic: string;
+    }[]
+  >(Prisma.sql`
+    SELECT v."verseKey", v."textUthmani", v."verseNumber", v."juzNumber",
+           v."pageNumber", v."globalOrder",
+           c."nameTransliterated" AS "chapterNameTransliterated",
+           c."nameArabic" AS "chapterNameArabic"
+    FROM "QuranVerse" v
+    JOIN "QuranChapter" c ON c.id = v."chapterId"
+    WHERE v."globalOrder" >= (
+      SELECT "globalOrder" FROM "QuranVerse" WHERE id = ${anchorVerseId}
+    )
+    ORDER BY v."globalOrder" ASC
+    OFFSET ${offset} LIMIT ${limit}
+  `);
+  if (rows.length !== limit) {
+    throw new Error(
+      `Expected ${limit} verses at offset ${offset} from anchor verse ${anchorVerseId}, got ${rows.length} - Quran data integrity problem, not a user error.`
+    );
+  }
+  return rows.map((verse) => ({
+    verseKey: verse.verseKey,
+    text: verse.textUthmani,
+    surah: `${verse.chapterNameTransliterated} (${verse.chapterNameArabic})`,
+    juz: verse.juzNumber,
+    page: verse.pageNumber
+  }));
+}
+
+/**
  * Advances reveal progress by exactly one ayah, guarded by
  * expectedRevealedCount as an optimistic-concurrency token: the caller
  * sends back the revealedAyahCount it last observed, and the update only
@@ -312,6 +364,96 @@ export async function revealNextAyah(
             revealedAyahCount: nextCount,
             totalAyahCount: question.revealTotalAyahCount,
             isComplete: nextCount >= question.revealTotalAyahCount,
+            verses
+          };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 15_000
+        }
+      )
+    )
+  );
+}
+
+/**
+ * Reveals every remaining ayah up to the boundary in one round trip,
+ * instead of the client looping N single-ayah reveal calls - "Soal
+ * selesai dijawab" (revealAll in
+ * components/memorization/memorization-app.tsx) uses this for a user who
+ * already answered from memory and explicitly asked to see the rest at
+ * once, rather than replaying revealNextAyah N times.
+ *
+ * This does not weaken the reveal-boundary invariant: the answer is still
+ * only ever sent after this explicit request, exactly as revealNextAyah
+ * only sends the next ayah after its own explicit click - the difference
+ * is how many ayat one authorized request is allowed to return, not any
+ * access without a request.
+ *
+ * No expectedRevealedCount token is needed here, unlike revealNextAyah:
+ * revealing "the rest, whatever that currently is" is naturally
+ * idempotent under a Serializable transaction - a repeat call after the
+ * first already-completed one just observes `remaining <= 0` and returns
+ * the same final state, and a concurrent single-ayah reveal is safely
+ * serialized against this one by the transaction isolation level rather
+ * than needing its own optimistic-concurrency check.
+ */
+export async function revealAllRemainingAyahs(
+  userId: string,
+  questionId: string
+): Promise<RevealMutationResult> {
+  return measureServerTiming("reveal_all_remaining_ayahs", () =>
+    retrySerialization(() =>
+      prisma.$transaction(
+        async (tx) => {
+          const question = await tx.memorizationQuestion.findFirst({
+            where: { id: questionId, userId },
+            select: {
+              id: true,
+              state: true,
+              anchorVerseId: true,
+              revealedAyahCount: true,
+              revealTotalAyahCount: true,
+              revealedVersesJson: true,
+              answerRevealedAt: true
+            }
+          });
+          if (!question) throw notFoundError();
+          if (question.state === "ASSESSED") throw alreadyAssessedError();
+
+          let verses = question.revealedVersesJson as unknown as RevealedAyah[];
+          const remaining =
+            question.revealTotalAyahCount - question.revealedAyahCount;
+
+          if (remaining > 0) {
+            const newVerses = await versesFromAnchor(
+              tx,
+              question.anchorVerseId,
+              question.revealedAyahCount,
+              remaining
+            );
+            verses = [...verses, ...newVerses];
+            await tx.memorizationQuestion.update({
+              where: { id: question.id },
+              data: {
+                revealedAyahCount: question.revealTotalAyahCount,
+                revealedVersesJson: verses as unknown as Prisma.InputJsonValue,
+                ...(question.answerRevealedAt
+                  ? {}
+                  : {
+                      answerRevealedAt: new Date(),
+                      state: "ANSWER_REVEALED" as const
+                    })
+              },
+              select: { id: true }
+            });
+          }
+
+          return {
+            questionId: question.id,
+            revealedAyahCount: question.revealTotalAyahCount,
+            totalAyahCount: question.revealTotalAyahCount,
+            isComplete: true,
             verses
           };
         },

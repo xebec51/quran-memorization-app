@@ -253,9 +253,14 @@ export function MemorizationApp({
    * "Soal selesai dijawab" - lets a user who already answered from memory
    * (on paper, out loud, in their head) skip clicking through one ayah at
    * a time. This does NOT bypass the reveal-completion gate on grading -
-   * it just calls the exact same /api/memorization/reveal endpoint
-   * revealNext does, repeatedly, until isComplete, then the existing
-   * grading panel appears exactly as it would after manual clicks. The
+   * it calls /api/memorization/reveal-all, which reveals every remaining
+   * ayah in one server round trip instead of looping the single-ayah
+   * reveal endpoint N times (previously the real source of the long wait
+   * on questions spanning many ayat - N sequential network round trips,
+   * not server-side slowness). The answer still only ever arrives after
+   * this explicit request, exactly as a single reveal click only sends
+   * the next ayah after being clicked; only how many ayat one authorized
+   * request returns changed, not any access without a request. The
    * server-side requirement that grading only follows a fully-revealed
    * question (submitAssessment's revealIncompleteError) is untouched.
    */
@@ -263,22 +268,14 @@ export function MemorizationApp({
     if (!question || !canUseQuestionActions) return;
     if (!beginAction("reveal-all")) return;
     const questionId = question.id;
-    let expectedRevealedCount = question.reveal.revealedAyahCount;
-    let isComplete = question.reveal.isComplete;
     try {
-      while (!isComplete) {
-        const data = await apiFetch<RevealMutation>(
-          "/api/memorization/reveal",
-          { questionId, expectedRevealedCount }
-        );
-        expectedRevealedCount = data.revealedAyahCount;
-        isComplete = data.isComplete;
-        applyRevealMutation(data);
-        if (revealAnnounceRef.current) {
-          revealAnnounceRef.current.textContent = isComplete
-            ? `Seluruh ${data.totalAyahCount} ayat telah terbuka.`
-            : `Membuka ayat ${data.revealedAyahCount} dari ${data.totalAyahCount}...`;
-        }
+      const data = await apiFetch<RevealMutation>(
+        "/api/memorization/reveal-all",
+        { questionId }
+      );
+      applyRevealMutation(data);
+      if (revealAnnounceRef.current) {
+        revealAnnounceRef.current.textContent = `Seluruh ${data.totalAyahCount} ayat telah terbuka.`;
       }
     } catch (err) {
       setError(

@@ -22,6 +22,19 @@ async function reveal(
   return { response, body: json.data };
 }
 
+async function revealAll(
+  request: APIRequestContext,
+  cookie: string,
+  questionId: string
+) {
+  const response = await request.post("/api/memorization/reveal-all", {
+    headers: { cookie },
+    data: { questionId }
+  });
+  const json = (await response.json()) as { data: RevealBody };
+  return { response, body: json.data };
+}
+
 test("progressive reveal accumulates ayahs one at a time and completes at the page boundary", async ({
   request
 }, testInfo) => {
@@ -90,6 +103,83 @@ test("revealing past completion is a no-op, not an error", async ({
   expect(overReveal.response.ok()).toBe(true);
   expect(overReveal.body.revealedAyahCount).toBe(total);
   expect(overReveal.body.verses).toHaveLength(total);
+});
+
+test("reveal-all opens every remaining ayah in one request, from a partial state, consistent with a later read", async ({
+  request
+}, testInfo) => {
+  const { cookie, pkg } = await registerApiUser(
+    request,
+    `${testInfo.project.name}-all`
+  );
+  const question = pkg.questions[0];
+  const total = question.reveal.totalAyahCount as number;
+  expect(total).toBeGreaterThan(0);
+
+  // Reveal one ayah manually first, so reveal-all is exercised from a
+  // partial (not just a from-zero) state.
+  const firstManual = await reveal(request, cookie, question.id, 0);
+  expect(firstManual.response.ok()).toBe(true);
+
+  const bulk = await revealAll(request, cookie, question.id);
+  expect(bulk.response.ok()).toBe(true);
+  expect(bulk.body.isComplete).toBe(true);
+  expect(bulk.body.revealedAyahCount).toBe(total);
+  expect(bulk.body.verses).toHaveLength(total);
+  // The manually-revealed first ayah stays intact within the bulk result.
+  expect(bulk.body.verses[0].verseKey).toBe(
+    firstManual.body.verses[0].verseKey
+  );
+
+  // Re-reading via the single-ayah endpoint past completion is a no-op
+  // that returns the persisted state - confirms the bulk write landed in
+  // the same shape the per-click path reads, not a divergent format.
+  const reread = await reveal(request, cookie, question.id, total);
+  expect(reread.response.ok()).toBe(true);
+  expect(reread.body.verses).toEqual(bulk.body.verses);
+});
+
+test("reveal-all is idempotent - a repeat call returns the same already-complete state", async ({
+  request
+}, testInfo) => {
+  const { cookie, pkg } = await registerApiUser(
+    request,
+    `${testInfo.project.name}-all-idempotent`
+  );
+  const question = pkg.questions[0];
+
+  const first = await revealAll(request, cookie, question.id);
+  expect(first.response.ok()).toBe(true);
+  expect(first.body.isComplete).toBe(true);
+
+  const second = await revealAll(request, cookie, question.id);
+  expect(second.response.ok()).toBe(true);
+  expect(second.body.revealedAyahCount).toBe(first.body.revealedAyahCount);
+  expect(second.body.verses).toEqual(first.body.verses);
+});
+
+test("reveal-all rejects a question that is already assessed", async ({
+  request
+}, testInfo) => {
+  const { cookie, pkg } = await registerApiUser(
+    request,
+    `${testInfo.project.name}-all-assessed`
+  );
+  const question = pkg.questions[0];
+
+  await revealAll(request, cookie, question.id);
+  const assessResponse = await request.post("/api/memorization/assessment", {
+    headers: { cookie },
+    data: { questionId: question.id, belCount: 0, tuntunCount: 0 }
+  });
+  expect(assessResponse.ok()).toBe(true);
+
+  const afterAssessed = await request.post("/api/memorization/reveal-all", {
+    headers: { cookie },
+    data: { questionId: question.id }
+  });
+  expect(afterAssessed.status()).toBe(409);
+  expect((await afterAssessed.json()).error.code).toBe("ALREADY_ASSESSED");
 });
 
 test("reveal progress and hint history survive a refresh (re-fetching the current package)", async ({

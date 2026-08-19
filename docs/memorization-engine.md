@@ -89,13 +89,27 @@ first, since this runs on every click and is the hottest path in the app.
 
 "Soal selesai dijawab" (`revealAll` in
 `components/memorization/memorization-app.tsx`) does not bypass any of
-this - it is a client-side loop that calls the exact same reveal endpoint
-repeatedly until complete, for a user who already answered from memory
-and doesn't want to click through one ayah at a time. The correct answer
-still only ever arrives from the server one ayah at a time; it is never
-sent to the client ahead of what's been revealed, since that would leak
-the hidden answer to network/dev-tools inspection before the user has
-earned it.
+this - it calls `POST /api/memorization/reveal-all`
+(`revealAllRemainingAyahs` in `lib/memorization/reveal/service.ts`), for
+a user who already answered from memory and doesn't want to click
+through one ayah at a time. This was originally a client-side loop
+calling the single-ayah reveal endpoint repeatedly, which meant a
+question spanning many ayat cost that many sequential network round
+trips and was the real source of the noticeable wait, not server latency
+per click. `revealAllRemainingAyahs` instead reveals every remaining
+ayah in one `Serializable` transaction and one round trip, via
+`versesFromAnchor` (the bulk sibling of `nthVerseFromAnchor` - same
+subquery-on-`globalOrder` shape, `LIMIT`ed to the remaining count instead
+of 1). The answer still only ever arrives from the server after this
+explicit request - nothing is sent ahead of what's been revealed, since
+that would leak the hidden answer to network/dev-tools inspection before
+the user has earned it; only how many ayat one authorized request is
+allowed to return changed, not any access without a request.
+`revealAllRemainingAyahs` needs no `expectedRevealedCount` token: unlike
+advancing by exactly one ayah, "reveal everything remaining" converges to
+the same final state regardless of the starting point, so it is
+naturally idempotent under the transaction's isolation level rather than
+needing its own optimistic-concurrency check.
 
 Grading a question (`submitAssessment`) and switching to another question
 in the same package are both rejected server-side - not just hidden in
