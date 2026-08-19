@@ -14,32 +14,61 @@ import type { RevealMutationResult, RevealedAyah } from "../types";
  * would repeat the same word/verse lookups on every reveal click; storing
  * them keeps that lookup a one-time cost per question.
  *
- * Reveal must continue through the ENTIRE page after the question's
- * primary page, not stop at the end of the primary page itself - e.g. a
- * question anchored on page 1 must reveal through the last ayah touching
- * page 2 (2:5), not stop at the last ayah touching page 1 (1:7). Page 604
- * (the last Mushaf page) is its own boundary: min(primaryPageNumber + 1,
- * mushafPages) naturally handles both the general case and the
- * end-of-Quran case without a separate branch.
+ * Reveal continues onto the next Mushaf page, but only as far into it as
+ * the question already "owed" the reader on its own page: the boundary
+ * lands on the verse covering the SAME printed line number, on the next
+ * page, that the question's fragment started on, on its own page -
+ * extended through the end of that verse (never cut mid-ayah, per
+ * fragmentStartLineNumber). A question starting near the top of its page
+ * pulls in only a sliver of the next page; one starting near the bottom
+ * pulls in nearly the whole next page - bounding the worst case to
+ * roughly one page's worth of reveal regardless of where on the page the
+ * question happens to start, instead of unconditionally claiming the
+ * entire next page (which could nearly double the test length for a
+ * question anchored right at a page's top). Page 604 (the last Mushaf
+ * page) has no next page to size against - `min(primaryPageNumber + 1,
+ * mushafPages)` naturally collapses the boundary page back onto
+ * primaryPageNumber itself there, which this function detects and treats
+ * as "claim the rest of this same page, unrestricted by line" (the old,
+ * unconditional behavior), since there is nothing to be proportional to.
  *
- * "Last word by globalOrder on the boundary page" only produces the
- * correct verse because QuranWord.globalOrder follows true canonical
- * (chapter, verse, position) order - see the fix in lib/quran/sync/sync.ts.
+ * "Last word by globalOrder [at or before the target line] on the
+ * boundary page" only produces the correct verse because
+ * QuranWord.globalOrder follows true canonical (chapter, verse, position)
+ * order - see the fix in lib/quran/sync/sync.ts. No verse in this
+ * dataset's Mushaf layout ever straddles two pages (verified against the
+ * synced dataset), so "the verse containing that word" can never spill
+ * onto a third page.
  */
 export async function computeRevealBoundary(
   tx: Prisma.TransactionClient | typeof prisma,
   anchorVerseId: number,
-  primaryPageNumber: number
+  primaryPageNumber: number,
+  fragmentStartLineNumber: number | null
 ) {
   const boundaryPageNumber = Math.min(
     primaryPageNumber + 1,
     productConfig.mushafPages
   );
-  const lastWordOnPage = await tx.quranWord.findFirst({
-    where: { pageNumber: boundaryPageNumber, charTypeName: "word" },
-    orderBy: { globalOrder: "desc" },
-    select: { verseId: true }
-  });
+  const targetLine =
+    boundaryPageNumber === primaryPageNumber ? null : fragmentStartLineNumber;
+
+  // The CASE-like ORDER BY prefers a word at or before targetLine (ties
+  // broken by the latest such word); if targetLine is null, or no word on
+  // the page qualifies, every row ties on the first key and the second
+  // key (globalOrder DESC) alone decides - which naturally resolves to
+  // the true last word of the page, i.e. the old unrestricted behavior.
+  // One query handles both the line-restricted and unrestricted cases.
+  const rows = await tx.$queryRaw<{ verseId: number }[]>(Prisma.sql`
+    SELECT w."verseId"
+    FROM "QuranWord" w
+    WHERE w."pageNumber" = ${boundaryPageNumber} AND w."charTypeName" = 'word'
+    ORDER BY
+      (${targetLine}::int IS NULL OR (w."lineNumber" IS NOT NULL AND w."lineNumber" <= ${targetLine}::int)) DESC,
+      w."globalOrder" DESC
+    LIMIT 1
+  `);
+  const lastWordOnPage = rows[0];
   if (!lastWordOnPage) {
     throw new Error(
       `No words found for page ${boundaryPageNumber}; run quran:sync first.`
@@ -79,45 +108,74 @@ export async function computeRevealBoundary(
  * Batched form of computeRevealBoundary for allocating an entire package
  * (up to 4 questions) at once: 2 queries total regardless of question
  * count, instead of up to 3 sequential queries PER question (up to 12 for
- * a 4-question package) - the boundary-page lookup and the anchor/
+ * a 4-question package) - the boundary-word lookup and the anchor/
  * boundary globalOrder lookups are each done once for every question
  * together, not once per question.
+ *
+ * The boundary word now depends on a per-question target line (see
+ * computeRevealBoundary), not just the shared boundary page, so two
+ * questions landing on the same boundary page can no longer be deduped
+ * down to one shared `DISTINCT ON (pageNumber)` lookup the way the old
+ * "always claim the whole page" version could - a single `LATERAL` join
+ * computes each question's own boundary word in one round trip instead.
  */
 export async function computeRevealBoundariesBulk(
   tx: Prisma.TransactionClient | typeof prisma,
-  sources: readonly { anchorVerseId: number; primaryPageNumber: number }[]
+  sources: readonly {
+    anchorVerseId: number;
+    primaryPageNumber: number;
+    fragmentStartLineNumber: number | null;
+  }[]
 ): Promise<{ boundaryVerseId: number; totalAyahCount: number }[]> {
   if (sources.length === 0) return [];
 
-  const boundaryPages = [
-    ...new Set(
-      sources.map((source) =>
-        Math.min(source.primaryPageNumber + 1, productConfig.mushafPages)
-      )
-    )
-  ];
+  const boundaryTargets = sources.map((source) => {
+    const boundaryPageNumber = Math.min(
+      source.primaryPageNumber + 1,
+      productConfig.mushafPages
+    );
+    const targetLine =
+      boundaryPageNumber === source.primaryPageNumber
+        ? null
+        : source.fragmentStartLineNumber;
+    return { boundaryPageNumber, targetLine };
+  });
 
-  const lastWordRows = await tx.$queryRaw<
-    { pageNumber: number; verseId: number }[]
-  >(Prisma.sql`
-    SELECT DISTINCT ON (w."pageNumber") w."pageNumber", w."verseId"
-    FROM "QuranWord" w
-    WHERE w."pageNumber" IN (${Prisma.join(boundaryPages)}) AND w."charTypeName" = 'word'
-    ORDER BY w."pageNumber", w."globalOrder" DESC
-  `);
-  const boundaryVerseIdByPage = new Map(
-    lastWordRows.map((row) => [row.pageNumber, row.verseId])
+  const boundaryRows = await tx.$queryRaw<{ idx: number; verseId: number }[]>(
+    Prisma.sql`
+    SELECT src.idx, w."verseId"
+    FROM (VALUES ${Prisma.join(
+      boundaryTargets.map(
+        (target, index) =>
+          Prisma.sql`(${index}::int, ${target.boundaryPageNumber}::int, ${target.targetLine}::int)`
+      )
+    )}) AS src(idx, boundary_page, target_line)
+    CROSS JOIN LATERAL (
+      SELECT w."verseId"
+      FROM "QuranWord" w
+      WHERE w."pageNumber" = src.boundary_page AND w."charTypeName" = 'word'
+      ORDER BY
+        (src.target_line IS NULL OR (w."lineNumber" IS NOT NULL AND w."lineNumber" <= src.target_line)) DESC,
+        w."globalOrder" DESC
+      LIMIT 1
+    ) w
+  `
   );
-  for (const page of boundaryPages) {
-    if (!boundaryVerseIdByPage.has(page)) {
-      throw new Error(`No words found for page ${page}; run quran:sync first.`);
+  const boundaryVerseIdByIndex = new Map(
+    boundaryRows.map((row) => [row.idx, row.verseId])
+  );
+  for (let index = 0; index < sources.length; index += 1) {
+    if (!boundaryVerseIdByIndex.has(index)) {
+      throw new Error(
+        `No words found for page ${boundaryTargets[index].boundaryPageNumber}; run quran:sync first.`
+      );
     }
   }
 
   const neededVerseIds = [
     ...new Set([
       ...sources.map((source) => source.anchorVerseId),
-      ...boundaryVerseIdByPage.values()
+      ...boundaryVerseIdByIndex.values()
     ])
   ];
   const verseRows = await tx.quranVerse.findMany({
@@ -128,12 +186,8 @@ export async function computeRevealBoundariesBulk(
     verseRows.map((row) => [row.id, row.globalOrder])
   );
 
-  return sources.map((source) => {
-    const boundaryPage = Math.min(
-      source.primaryPageNumber + 1,
-      productConfig.mushafPages
-    );
-    const boundaryVerseId = boundaryVerseIdByPage.get(boundaryPage)!;
+  return sources.map((source, index) => {
+    const boundaryVerseId = boundaryVerseIdByIndex.get(index)!;
     const anchorGlobalOrder = globalOrderByVerseId.get(source.anchorVerseId);
     const boundaryGlobalOrder = globalOrderByVerseId.get(boundaryVerseId);
     if (anchorGlobalOrder === undefined || boundaryGlobalOrder === undefined) {

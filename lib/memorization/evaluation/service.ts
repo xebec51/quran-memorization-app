@@ -153,6 +153,7 @@ export async function getOrCreateEvaluationSession(
               id: true,
               anchorVerseId: true,
               primaryPageNumber: true,
+              fragmentStartWord: { select: { lineNumber: true } },
               assessment: { select: { assessment: true } }
             }
           });
@@ -184,7 +185,8 @@ export async function getOrCreateEvaluationSession(
           const boundary = await computeRevealBoundary(
             tx,
             question.anchorVerseId,
-            question.primaryPageNumber
+            question.primaryPageNumber,
+            question.fragmentStartWord.lineNumber
           );
           const created = await tx.evaluationSession.create({
             data: {

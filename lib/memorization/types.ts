@@ -51,6 +51,11 @@ export type GeneratedQuestionSource = {
   anchorVerseKey: string;
   pagePositionBucket: PagePositionBucket;
   fragmentStartWordId: number;
+  // The printed Mushaf line the fragment starts on, on primaryPageNumber -
+  // see computeRevealBoundary in lib/memorization/reveal/service.ts, which
+  // uses this to size the reveal boundary on the next page proportionally
+  // instead of always claiming the entire next page.
+  fragmentStartLineNumber: number | null;
   initialWordCount: number;
   visibleWordCount: number;
   fragmentText: string;

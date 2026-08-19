@@ -51,6 +51,7 @@ export function generateQuestionSource(params: {
     anchorVerseKey: anchor.verseKey,
     pagePositionBucket: params.preferredBucket,
     fragmentStartWordId: anchor.id,
+    fragmentStartLineNumber: anchor.lineNumber,
     initialWordCount,
     visibleWordCount: initialWordCount,
     fragmentText: joinArabicWords(fragmentWords)

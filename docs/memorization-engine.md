@@ -61,17 +61,37 @@ Hint-only pages never consume primary page eligibility.
 Answer reveal is click-by-click, not a single "show answer" action. Each
 click reveals exactly one more ayah, starting from the question's anchor
 verse. The reveal boundary - how far a question can be revealed - is
-`min(primaryPageNumber + 1, 604)`: reveal continues through the _entire
-next Mushaf page_ after the question's primary page, not just to the end
-of the primary page itself. A question anchored on page 1 reveals through
-the last ayah touching page 2 (2:5), not just the last ayah touching page
-1 (1:7). Page 604 has no next page, so `min(605, 604) = 604` naturally
-caps the boundary at the end of the Quran with no separate branch needed.
-An ayah is never cut at a page boundary - the boundary is always a whole
-verse's `globalOrder`, computed once from `QuranWord.globalOrder`
-following true canonical (chapter, verse, position) order (see
-`lib/quran/sync/sync.ts`), never from provider-supplied word ids, which
-are not monotonic across surah boundaries.
+sized against `min(primaryPageNumber + 1, 604)` (the next Mushaf page),
+but not by unconditionally claiming that entire page: the boundary lands
+on the verse covering the _same printed line number, on the next page_,
+that the question's fragment started on, on its own page - extended
+through the end of that verse, never cut mid-ayah. A question anchored
+near the top of its page (fragment starts at, say, line 1) only pulls a
+sliver of the next page into the test; one anchored near the bottom
+(fragment starts at line 14 of a 15-line page) pulls in nearly the whole
+next page. This bounds the worst case to roughly one page's worth of
+reveal regardless of where on the page the question happens to start,
+rather than a question that starts right at a page's top always
+demanding close to two full pages of recall (nearly all of its own page
+plus the entire next one) before grading unlocks. Page 604 has no next
+page, so `min(605, 604) = 604` collapses the boundary page back onto
+`primaryPageNumber` itself - detected and treated as "claim the rest of
+this page outright, unrestricted by line," since there is no next page to
+size proportionally against. An ayah is never cut at a page boundary -
+the boundary is always a whole verse's `globalOrder`, computed once from
+`QuranWord.globalOrder` following true canonical (chapter, verse,
+position) order (see `lib/quran/sync/sync.ts`), never from
+provider-supplied word ids, which are not monotonic across surah
+boundaries. No verse in the synced Mushaf layout ever straddles two
+pages, so the boundary verse can never spill past the next page onto a
+third one.
+
+The "same line, next page" target comes from
+`fragmentStartLineNumber` (`GeneratedQuestionSource`, populated from the
+anchor word's `QuranWord.lineNumber` in
+`lib/memorization/question/generator.ts`) - real per-word Mushaf line
+layout data supplied by the Quran Foundation Content API and synced
+alongside everything else (see `lib/quran/sync/sync.ts`).
 
 `revealBoundaryVerseId` and `revealTotalAyahCount` are computed once, at
 question-generation time (`computeRevealBoundary`/
