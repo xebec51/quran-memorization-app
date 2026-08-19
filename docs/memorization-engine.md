@@ -147,7 +147,15 @@ its own state:
 - Reveal progress lives in its own `EvaluationSession` row
   (`(userId, questionId)` unique), completely separate from
   `MemorizationQuestion`'s own reveal columns - main-cycle reveal state is
-  never touched by practicing a question here.
+  never touched by practicing a question here. "Soal selesai dijawab"
+  (`POST /api/evaluation/reveal-all`, `revealAllRemainingEvaluationAyahs`)
+  reveals every remaining ayah of the session in one round trip, the same
+  as the main flow's `revealAllRemainingAyahs` and for the same reason -
+  looping the single-ayah endpoint cost one network round trip per ayah,
+  the real source of the wait on a long session, not server latency per
+  click. Both share `versesFromAnchor`
+  (`lib/memorization/reveal/service.ts`), the bulk, `LIMIT`-N sibling of
+  `nthVerseFromAnchor`.
 - Submitting an attempt (`submitEvaluationAttempt`) requires the session
   to be fully revealed first (409 `REVEAL_INCOMPLETE` otherwise) and
   requires integer `belCount`/`tuntunCount` >= 0, validated both

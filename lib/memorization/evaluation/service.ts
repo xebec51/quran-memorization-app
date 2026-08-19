@@ -11,7 +11,11 @@ import {
   revealIncompleteError
 } from "../errors";
 import { retrySerialization } from "../persistence-retry";
-import { computeRevealBoundary, nthVerseFromAnchor } from "../reveal/service";
+import {
+  computeRevealBoundary,
+  nthVerseFromAnchor,
+  versesFromAnchor
+} from "../reveal/service";
 import type {
   EvaluationAttemptDto,
   EvaluationBankItem,
@@ -288,6 +292,81 @@ export async function revealNextEvaluationAyah(
           ]);
           return sessionDto(questionId, fragments.get(questionId) ?? "", {
             revealedAyahCount: nextCount,
+            revealTotalAyahCount: session.revealTotalAyahCount,
+            revealedVersesJson: verses
+          });
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 15_000
+        }
+      )
+    )
+  );
+}
+
+/**
+ * Reveals every remaining ayah of an evaluation session in one round
+ * trip, mirroring lib/memorization/reveal/service.ts's
+ * revealAllRemainingAyahs for the main flow's "Soal selesai dijawab" -
+ * same rationale (N sequential single-ayah round trips was the real
+ * source of the wait on a long session, not server latency per click)
+ * and same no-expectedRevealedCount-needed idempotency (revealing "the
+ * rest, whatever that currently is" converges to the same final state
+ * regardless of starting point under the transaction's isolation level).
+ */
+export async function revealAllRemainingEvaluationAyahs(
+  userId: string,
+  questionId: string
+): Promise<EvaluationSessionDto> {
+  return measureServerTiming("evaluation_reveal_all_remaining_ayahs", () =>
+    retrySerialization(() =>
+      prisma.$transaction(
+        async (tx) => {
+          const question = await tx.memorizationQuestion.findFirst({
+            where: { id: questionId, userId },
+            select: { id: true, anchorVerseId: true }
+          });
+          if (!question) throw notFoundError();
+
+          const session = await tx.evaluationSession.findUnique({
+            where: { userId_questionId: { userId, questionId } },
+            select: {
+              id: true,
+              revealedAyahCount: true,
+              revealTotalAyahCount: true,
+              revealedVersesJson: true
+            }
+          });
+          if (!session) throw notFoundError();
+
+          let verses = session.revealedVersesJson as unknown as RevealedAyah[];
+          const remaining =
+            session.revealTotalAyahCount - session.revealedAyahCount;
+
+          if (remaining > 0) {
+            const newVerses = await versesFromAnchor(
+              tx,
+              question.anchorVerseId,
+              session.revealedAyahCount,
+              remaining
+            );
+            verses = [...verses, ...newVerses];
+            await tx.evaluationSession.update({
+              where: { id: session.id },
+              data: {
+                revealedAyahCount: session.revealTotalAyahCount,
+                revealedVersesJson: verses as unknown as Prisma.InputJsonValue
+              },
+              select: { id: true }
+            });
+          }
+
+          const fragments = await immutableFragmentTextsByQuestionId(tx, [
+            questionId
+          ]);
+          return sessionDto(questionId, fragments.get(questionId) ?? "", {
+            revealedAyahCount: session.revealTotalAyahCount,
             revealTotalAyahCount: session.revealTotalAyahCount,
             revealedVersesJson: verses
           });

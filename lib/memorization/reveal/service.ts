@@ -238,12 +238,13 @@ export async function nthVerseFromAnchor(
 /**
  * Every remaining verse from `offset` through `offset + limit - 1` after
  * the anchor, in canonical order, in one round trip - the bulk sibling of
- * nthVerseFromAnchor. Used only for revealing the rest of a question at
- * once (see revealAllRemainingAyahs): fetching N verses one at a time
- * would cost N round trips against Neon for no reason, since the caller
- * already wants every one of them.
+ * nthVerseFromAnchor. Used for revealing the rest of a question or
+ * evaluation session at once (see revealAllRemainingAyahs and
+ * evaluation/service.ts's revealAllRemainingEvaluationAyahs): fetching N
+ * verses one at a time would cost N round trips against Neon for no
+ * reason, since the caller already wants every one of them.
  */
-async function versesFromAnchor(
+export async function versesFromAnchor(
   tx: Prisma.TransactionClient | typeof prisma,
   anchorVerseId: number,
   offset: number,

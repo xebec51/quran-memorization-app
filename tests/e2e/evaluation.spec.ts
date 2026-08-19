@@ -320,6 +320,91 @@ test("submitting an evaluation attempt before its reveal is complete is rejected
   expect(complete.ok()).toBe(true);
 });
 
+test("evaluation reveal-all opens every remaining ayah in one request, from a partial state, consistent with a later read", async ({
+  request
+}, testInfo) => {
+  const { cookie, questionIds } = await setupAssessedQuestions(
+    request,
+    `${testInfo.project.name}-reveal-all`
+  );
+  const questionId = questionIds.missed[0];
+
+  const sessionResponse = await request.post("/api/evaluation/session", {
+    headers: { cookie },
+    data: { questionId }
+  });
+  expect(sessionResponse.ok()).toBe(true);
+  const total = ((await sessionResponse.json()).data as SessionDto)
+    .totalAyahCount;
+  expect(total).toBeGreaterThan(0);
+
+  // Reveal one ayah manually first, so reveal-all is exercised from a
+  // partial (not just a from-zero) state.
+  const firstManual = await request.post("/api/evaluation/reveal", {
+    headers: { cookie },
+    data: { questionId, expectedRevealedCount: 0 }
+  });
+  expect(firstManual.ok()).toBe(true);
+  const firstVerseKey = ((await firstManual.json()).data as SessionDto)
+    .verses[0].verseKey;
+
+  const bulk = await request.post("/api/evaluation/reveal-all", {
+    headers: { cookie },
+    data: { questionId }
+  });
+  expect(bulk.ok()).toBe(true);
+  const bulkBody = (await bulk.json()).data as SessionDto;
+  expect(bulkBody.isComplete).toBe(true);
+  expect(bulkBody.revealedAyahCount).toBe(total);
+  expect(bulkBody.verses).toHaveLength(total);
+  // The manually-revealed first ayah stays intact within the bulk result.
+  expect(bulkBody.verses[0].verseKey).toBe(firstVerseKey);
+
+  // Re-reading via the single-ayah endpoint past completion is a no-op
+  // that returns the persisted state - confirms the bulk write landed in
+  // the same shape the per-click path reads.
+  const reread = await request.post("/api/evaluation/reveal", {
+    headers: { cookie },
+    data: { questionId, expectedRevealedCount: total }
+  });
+  expect(reread.ok()).toBe(true);
+  expect(((await reread.json()).data as SessionDto).verses).toEqual(
+    bulkBody.verses
+  );
+});
+
+test("evaluation reveal-all is idempotent - a repeat call returns the same already-complete state", async ({
+  request
+}, testInfo) => {
+  const { cookie, questionIds } = await setupAssessedQuestions(
+    request,
+    `${testInfo.project.name}-reveal-all-idempotent`
+  );
+  const questionId = questionIds.missed[0];
+
+  await request.post("/api/evaluation/session", {
+    headers: { cookie },
+    data: { questionId }
+  });
+
+  const first = await request.post("/api/evaluation/reveal-all", {
+    headers: { cookie },
+    data: { questionId }
+  });
+  expect(first.ok()).toBe(true);
+  const firstBody = (await first.json()).data as SessionDto;
+  expect(firstBody.isComplete).toBe(true);
+
+  const second = await request.post("/api/evaluation/reveal-all", {
+    headers: { cookie },
+    data: { questionId }
+  });
+  expect(second.ok()).toBe(true);
+  const secondBody = (await second.json()).data as SessionDto;
+  expect(secondBody.revealedAyahCount).toBe(firstBody.revealedAyahCount);
+  expect(secondBody.verses).toEqual(firstBody.verses);
+});
+
 test("evaluation attempts never overwrite the main-cycle assessment and are kept as separate history", async ({
   request
 }, testInfo) => {

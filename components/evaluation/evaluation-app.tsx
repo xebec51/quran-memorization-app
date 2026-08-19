@@ -5,6 +5,7 @@ import {
   AlarmClock,
   CheckCircle2,
   Eye,
+  FastForward,
   History,
   ListChecks,
   Repeat
@@ -90,6 +91,7 @@ export function EvaluationApp({
   const [justSaved, setJustSaved] = useState<JustSaved | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
+  const [revealAllPending, setRevealAllPending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
   const [loadingMoreBank, setLoadingMoreBank] = useState(false);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
@@ -103,6 +105,7 @@ export function EvaluationApp({
   const [sessionError, setSessionError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
   const revealLockRef = useRef(false);
+  const revealAllLockRef = useRef(false);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // One key per selected question, reused across retries of the same
   // submission (double-click, dropped response) so the server can dedupe -
@@ -136,8 +139,10 @@ export function EvaluationApp({
     // question's UI.
     activeQuestionIdRef.current = item.questionId;
     revealLockRef.current = false;
+    revealAllLockRef.current = false;
     submitLockRef.current = false;
     setRevealPending(false);
+    setRevealAllPending(false);
     setSubmitPending(false);
     setSelectedId(item.questionId);
     setSession(null);
@@ -186,6 +191,39 @@ export function EvaluationApp({
     } finally {
       revealLockRef.current = false;
       if (activeQuestionIdRef.current === questionId) setRevealPending(false);
+    }
+  }
+
+  /**
+   * "Soal selesai dijawab" - same rationale as the main flow's revealAll
+   * (components/memorization/memorization-app.tsx): reveals every
+   * remaining ayah of this session in one round trip via
+   * /api/evaluation/reveal-all instead of looping revealNext N times, for
+   * a user who already answered from memory. The answer still only ever
+   * arrives after this explicit request.
+   */
+  async function revealAll() {
+    if (!session || revealAllLockRef.current || session.isComplete) return;
+    const questionId = session.questionId;
+    revealAllLockRef.current = true;
+    setRevealAllPending(true);
+    setSessionError(null);
+    try {
+      const data = await apiFetch<SessionDto>("/api/evaluation/reveal-all", {
+        questionId
+      });
+      if (activeQuestionIdRef.current !== questionId) return;
+      setSession(data);
+    } catch (err) {
+      if (activeQuestionIdRef.current !== questionId) return;
+      setSessionError(
+        err instanceof Error ? err.message : "Gagal membuka seluruh ayat."
+      );
+    } finally {
+      revealAllLockRef.current = false;
+      if (activeQuestionIdRef.current === questionId) {
+        setRevealAllPending(false);
+      }
     }
   }
 
@@ -512,9 +550,24 @@ export function EvaluationApp({
                   list grows - matches the main flow's reveal button
                   placement (components/memorization/memorization-app.tsx). */}
               {!session.isComplete ? (
-                <Button onClick={revealNext} disabled={revealPending}>
-                  <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
-                </Button>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Button
+                    onClick={revealNext}
+                    disabled={revealPending || revealAllPending}
+                  >
+                    <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={revealAll}
+                    disabled={revealPending || revealAllPending}
+                  >
+                    <FastForward aria-hidden className="h-4 w-4" />{" "}
+                    {revealAllPending
+                      ? "Membuka semua ayat..."
+                      : "Soal selesai dijawab"}
+                  </Button>
+                </div>
               ) : (
                 <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
                   <p className="text-sm font-medium">Evaluasi jawaban</p>
