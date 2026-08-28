@@ -42,15 +42,27 @@ export async function getAnalytics(userId: string) {
             where: { cycleId: cycle.id, state: "COMPLETED" }
           })
         : Promise.resolve(0),
-      prisma.memorizationQuestion.count({ where: { userId } }),
+      // This whole page tells the story of 604-page cycle progress, and a
+      // question sourced from an external bank (STQHN 2025 - see
+      // stqhnQuestionId on MemorizationQuestion) was never part of that
+      // cycle. Mixing it in would silently skew every metric below with
+      // attempts/hints that don't belong to the rotation these views
+      // describe - STQHN gets its own summary on its own page instead
+      // (lib/memorization/stqhn/service.ts) - so every query in this
+      // Promise.all that reads MemorizationQuestion, directly or via a
+      // relation, is scoped to cycleId IS NOT NULL, same as
+      // pagesTested/packagesCompleted above.
+      prisma.memorizationQuestion.count({
+        where: { userId, cycleId: { not: null } }
+      }),
       prisma.questionAssessment.groupBy({
         by: ["assessment"],
-        where: { userId },
+        where: { userId, question: { cycleId: { not: null } } },
         _count: { assessment: true }
       }),
       prisma.hintEvent.groupBy({
         by: ["type"],
-        where: { userId },
+        where: { userId, question: { cycleId: { not: null } } },
         _count: { type: true }
       }),
       prisma.$queryRaw<BandPerformanceRow[]>`
@@ -62,7 +74,7 @@ export async function getAnalytics(userId: string) {
         FROM "MemorizationQuestion" AS question
         LEFT JOIN "QuestionAssessment" AS assessment ON assessment."questionId" = question."id"
         LEFT JOIN "HintEvent" AS hint ON hint."questionId" = question."id"
-        WHERE question."userId" = ${userId}
+        WHERE question."userId" = ${userId} AND question."cycleId" IS NOT NULL
         GROUP BY question."juzBand"
       `,
       prisma.$queryRaw<WeakestPageRow[]>`
@@ -74,7 +86,7 @@ export async function getAnalytics(userId: string) {
         FROM "MemorizationQuestion" AS question
         LEFT JOIN "QuestionAssessment" AS assessment ON assessment."questionId" = question."id"
         LEFT JOIN "HintEvent" AS hint ON hint."questionId" = question."id"
-        WHERE question."userId" = ${userId}
+        WHERE question."userId" = ${userId} AND question."cycleId" IS NOT NULL
         GROUP BY question."primaryPageNumber"
         HAVING COUNT(DISTINCT question."id") >= 2
         ORDER BY (

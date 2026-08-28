@@ -198,3 +198,65 @@ its own state:
   `(createdAt, id)` (history) or `(assessment desc, id asc)` (bank) pair,
   never loaded in full, so pagination never skips or duplicates rows as
   new attempts land between page fetches.
+
+## STQHN 2025 Question Bank
+
+STQHN 2025 is a fixed, externally-sourced question bank (372 real
+hafalan prompts from Seleksi Tilawah Qur'an dan Hafalan Nasional 2025),
+separate from the randomized 604-page cycle above but built entirely out
+of the same machinery - no parallel reveal/hint/assessment/evaluation
+system exists for it.
+
+- `StqhnQuestion` (`prisma/schema.prisma`) is the global, shared bank
+  content - one row per source `master_bank_id`, not per-user. A
+  per-user attempt is a lazily-created `MemorizationQuestion` row linked
+  via the nullable `stqhnQuestionId` FK, so it carries reveal state, hint
+  counts, and the `QuestionAssessment`/`EvaluationSession`/
+  `EvaluationAttempt` relations exactly like a main-cycle question -
+  `getOrCreateStqhnAttempt` (`lib/memorization/stqhn/service.ts`) is the
+  only STQHN-aware code in that whole path. `@@unique([userId,
+stqhnQuestionId])` is what makes selecting the same bank item twice
+  idempotent (get-or-create, never a duplicate row).
+- `MemorizationQuestion.cycleId`/`packageId`/`orderInPackage` are
+  nullable specifically to host STQHN questions honestly: they are not
+  part of any 604-page cycle or package, so cycle/package analytics
+  (`lib/memorization/analytics/service.ts`) explicitly filter
+  `cycleId IS NOT NULL` to exclude them, and `completePackageIfReady` is
+  never called for a null `packageId`.
+- `lib/quran/stqhn/import.ts` (`npm run stqhn:import`) imports only
+  `question_type: "HIFZH_PROMPT"` records - both `competitionBranch`
+  values (`HIFZH_30_JUZ_INDEPENDENT`, `TAFSIR_ARABIC`) carry hifzh
+  prompts in the source export, but any Tafsir maqra question type is
+  excluded. It upserts by `masterBankId` (the source's own stable key),
+  so re-running the same or an updated file never duplicates rows, and
+  the bank-listing teaser fragment is generated deterministically
+  (`SeededRandomSource(masterBankId)`, the same `initialWordRange`
+  heuristic as the main flow's generator) so a re-import reproduces
+  byte-identical content, not just the same row count. `start_verse_key`
+  is the practice anchor - always the true start of that ayah - while the
+  source's own `start_word_index` (which can point mid-ayah) is kept only
+  as archived metadata, never used to position the reveal. `timestampEnd`/
+  `timestampEndSec`/`sourceTranscript` are nullable because a real,
+  systematic subset of the export (224 of 372 records) genuinely lacks
+  them; the transcript files themselves are never read at runtime, only
+  by this one-time import.
+- The source YouTube link is treated like any other hidden-metadata field
+  (see "Hidden Metadata Rule" in `AGENT.md`): `getStqhnBank` never
+  exposes it, since it is literally the recorded original answer.
+  `getStqhnHistory` includes it - as `sourceVideoUrl`, seeked to
+  `timestampStartSec` - only because a history row exists solely for a
+  question that has already been assessed.
+- Selecting a bank question reveals via the same
+  `computeRevealBoundary` used by the main cycle (see "Progressive
+  Reveal" above), anchored on the STQHN question's own page/line rather
+  than a cycle-generated one; `pagePositionBucket` is fixed to `"START"`
+  for every STQHN question as a deliberate simplification (there is no
+  cycle-driven page position to derive it from).
+- Grading reuses `submitAssessment` unmodified: `bel=0 && tuntun=0` is
+  `CORRECT`, anything else is `MISSED`/`PARTIAL` and the question
+  surfaces in the Evaluation Bank exactly like a main-cycle miss, with no
+  STQHN-specific branch in either `submitAssessment` or
+  `getEvaluationBank`. Practicing it back to a clean pass in Evaluation
+  Practice never overwrites the original `QuestionAssessment`, so the
+  question remains retestable indefinitely and every attempt (STQHN and
+  evaluation-practice alike) is kept as its own history row.

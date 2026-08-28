@@ -53,6 +53,16 @@ enum RecallAssessment {
   MISSED
 }
 
+// The two source branches STQHN 2025's master question bank distinguishes -
+// see lib/quran/stqhn/import.ts. Only HIFZH_PROMPT-type questions from
+// either branch are ever imported (Tafsir maqra questions are excluded at
+// import time), but the branch itself is real source provenance worth
+// keeping distinct even though both land in the same hifzh bank.
+enum StqhnCompetitionBranch {
+  HIFZH_30_JUZ_INDEPENDENT
+  TAFSIR_ARABIC
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -145,6 +155,7 @@ model QuranVerse {
   anchorForQuestions                  MemorizationQuestion[] @relation("QuestionAnchorVerse")
   revealBoundaryForQuestions          MemorizationQuestion[] @relation("QuestionRevealBoundaryVerse")
   revealBoundaryForEvaluationSessions EvaluationSession[]    @relation("EvaluationSessionRevealBoundaryVerse")
+  anchorForStqhnQuestions             StqhnQuestion[]        @relation("StqhnQuestionAnchorVerse")
 
   @@unique([chapterId, verseNumber])
   @@index([pageNumber, globalOrder])
@@ -165,9 +176,10 @@ model QuranWord {
   charTypeName String
   location     String?
 
-  verse                     QuranVerse             @relation(fields: [verseId], references: [id], onDelete: Cascade)
-  page                      QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
-  fragmentStartForQuestions MemorizationQuestion[] @relation("QuestionFragmentStartWord")
+  verse                          QuranVerse             @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  page                           QuranPage              @relation(fields: [pageNumber], references: [pageNumber], onDelete: Restrict)
+  fragmentStartForQuestions      MemorizationQuestion[] @relation("QuestionFragmentStartWord")
+  fragmentStartForStqhnQuestions StqhnQuestion[]        @relation("StqhnQuestionFragmentStartWord")
 
   @@unique([verseId, position])
   @@index([pageNumber, globalOrder])
@@ -232,9 +244,19 @@ model MemorizationPackage {
 model MemorizationQuestion {
   id                    String             @id @default(cuid())
   userId                String
-  cycleId               String
-  packageId             String
-  orderInPackage        Int
+  // Nullable: only questions generated from the 604-page cycle plan belong
+  // to a cycle/package/order at all. A question sourced from an external
+  // bank (see stqhnQuestionId below) has none of the three - it is not
+  // part of the cyclical 604-page rotation, so there is no cycle/package
+  // for it to belong to, rather than a fake placeholder one. Every
+  // existing query that filters by a concrete cycleId/packageId (equality,
+  // never a scan) already excludes NULL rows correctly per SQL's
+  // three-valued logic; the one place that needed an explicit guard for a
+  // possibly-null packageId is submitAssessment's completePackageIfReady
+  // call in lib/memorization/service.ts.
+  cycleId               String?
+  packageId             String?
+  orderInPackage        Int?
   state                 QuestionState      @default(ACTIVE)
   primaryPageNumber     Int
   juzNumber             Int
@@ -254,16 +276,27 @@ model MemorizationQuestion {
   revealBoundaryVerseId Int
   revealTotalAyahCount  Int
   revealedVersesJson    Json               @default("[]")
+  // Set only for a question instantiated from the STQHN 2025 bank (see
+  // StqhnQuestion below) - one MemorizationQuestion per (user,
+  // stqhnQuestion) pair, created lazily the first time that user selects
+  // it (lib/memorization/stqhn/service.ts), exactly like EvaluationSession
+  // is lazily created per (user, question). Everything downstream of
+  // creation - reveal, hints, submitAssessment, and therefore the
+  // Evaluation Bank/Practice loop for a MISSED result - is the same
+  // MemorizationQuestion machinery used by cycle-plan questions, entirely
+  // unmodified.
+  stqhnQuestionId       String?
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 
-  user                User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cycle               MemorizationCycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
-  package             MemorizationPackage @relation(fields: [packageId], references: [id], onDelete: Cascade)
-  primaryPage         QuranPage           @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
-  anchorVerse         QuranVerse          @relation("QuestionAnchorVerse", fields: [anchorVerseId], references: [id], onDelete: Restrict)
-  fragmentStartWord   QuranWord           @relation("QuestionFragmentStartWord", fields: [fragmentStartWordId], references: [id], onDelete: Restrict)
-  revealBoundaryVerse QuranVerse          @relation("QuestionRevealBoundaryVerse", fields: [revealBoundaryVerseId], references: [id], onDelete: Restrict)
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cycle               MemorizationCycle?   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  package             MemorizationPackage? @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  primaryPage         QuranPage            @relation(fields: [primaryPageNumber], references: [pageNumber], onDelete: Restrict)
+  anchorVerse         QuranVerse           @relation("QuestionAnchorVerse", fields: [anchorVerseId], references: [id], onDelete: Restrict)
+  fragmentStartWord   QuranWord            @relation("QuestionFragmentStartWord", fields: [fragmentStartWordId], references: [id], onDelete: Restrict)
+  revealBoundaryVerse QuranVerse           @relation("QuestionRevealBoundaryVerse", fields: [revealBoundaryVerseId], references: [id], onDelete: Restrict)
+  stqhnQuestion       StqhnQuestion?       @relation(fields: [stqhnQuestionId], references: [id], onDelete: Restrict)
   hintEvents          HintEvent[]
   assessment          QuestionAssessment?
   evaluationAttempts  EvaluationAttempt[]
@@ -272,6 +305,12 @@ model MemorizationQuestion {
   @@unique([cycleId, primaryPageNumber])
   @@unique([cycleId, anchorVerseId])
   @@unique([packageId, orderInPackage])
+  // The idempotency guard for the STQHN world: one MemorizationQuestion
+  // per user per bank item, ever - the three constraints above go
+  // vacuous for NULL cycleId/packageId rows (Postgres treats NULLs as
+  // pairwise-distinct in unique indexes), so this is not redundant with
+  // them, it is the actual guard against duplicate STQHN instantiation.
+  @@unique([userId, stqhnQuestionId])
   @@index([userId, createdAt])
   @@index([userId, juzBand])
   @@index([userId, primaryPageNumber])
@@ -297,10 +336,10 @@ model HintEvent {
 }
 
 model QuestionAssessment {
-  id         String           @id @default(cuid())
-  userId     String
-  questionId String           @unique
-  assessment RecallAssessment
+  id          String           @id @default(cuid())
+  userId      String
+  questionId  String           @unique
+  assessment  RecallAssessment
   // Objective MHQ-style scoring: number of bell rings / prompts needed
   // during self-assessment, replacing the old subjective three-way
   // Benar/Sebagian benar/Belum ingat choice. Nullable and additive -
@@ -376,4 +415,85 @@ model EvaluationSession {
   revealBoundaryVerse QuranVerse           @relation("EvaluationSessionRevealBoundaryVerse", fields: [revealBoundaryVerseId], references: [id], onDelete: Restrict)
 
   @@unique([userId, questionId])
+}
+
+// One global row per STQHN 2025 master-bank question (imported from
+// stqhn2025_all_5_videos_hifzh_master_372_with_youtube_links.json via
+// lib/quran/stqhn/import.ts) - NOT per-user. This is the fixed, shared
+// question bank content; per-user reveal/grading progress against a given
+// row lives on its own MemorizationQuestion (see stqhnQuestionId there),
+// created lazily the first time that user selects this question.
+//
+// masterBankId is the source dataset's own stable id (e.g.
+// "STQHN2025-HIFZH-001") and is the idempotency key the import upserts
+// on, so re-running the import never creates duplicates. questionId is
+// the source's own per-video/participant/question code (e.g.
+// "V1-P01-Q01") - also unique, kept as a second natural key purely for
+// display/cross-referencing against the source transcripts.
+//
+// anchorVerseId is resolved from startVerseKey at import time (never at
+// read time) and is always the verse whose first word TasmiQ's practice
+// UI starts from - the fragment always begins at the beginning of that
+// ayah regardless of the source's own startWordIndex, which is kept only
+// as archival metadata below and never used to compute the actual
+// fragment/reveal start.
+//
+// fragmentStartWordId/initialWordCount/fragmentText are the teaser shown
+// in the STQHN bank listing before a question is selected - computed
+// once at import time (deterministically, seeded on masterBankId, same
+// initialWordRange heuristic as lib/memorization/question/generator.ts)
+// rather than per user, so every user browsing the shared bank sees the
+// identical teaser for a given question, and so the per-user
+// MemorizationQuestion created on first selection can simply copy these
+// already-resolved values instead of re-deriving them.
+model StqhnQuestion {
+  id                       String                 @id @default(cuid())
+  masterBankId             String                 @unique
+  questionId               String                 @unique
+  videoId                  String
+  competitionDay           Int
+  competitionBranch        StqhnCompetitionBranch
+  // Archived verbatim from the source's own `question_type` - every row
+  // is HIFZH_PROMPT today (the import rejects anything else), kept as a
+  // literal field rather than assumed so a future re-import stays
+  // self-documenting if the source format ever changes.
+  questionType             String
+  participantDisplayNo     Int
+  questionNoForParticipant Int
+  timestampStart           String
+  timestampStartSec        Float
+  // Nullable: a real, systematic subset of the source export (224 of 372
+  // records, all sharing this same gap) has no recorded end timestamp at
+  // all - genuinely unknown, not zero or equal to the start, so modeled
+  // as null rather than a fabricated value.
+  timestampEnd             String?
+  timestampEndSec          Float?
+  startVerseKey            String
+  endVerseKey              String
+  passageRange             String
+  // Archival only - see anchorVerseId doc comment above. Never used to
+  // compute where a TasmiQ practice fragment starts.
+  startWordIndex           Int
+  startsAtVerseBeginning   Boolean
+  confidence               String
+  audioReviewNeeded        Boolean
+  auditNote                String
+  // Nullable for the same reason as timestampEnd above - the same 224
+  // records omit this field too (always the same three fields together).
+  sourceTranscript         String?
+  sourceYoutubeUrl         String
+  anchorVerseId            Int
+  fragmentStartWordId      Int
+  initialWordCount         Int
+  fragmentText             String
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  anchorVerse       QuranVerse             @relation("StqhnQuestionAnchorVerse", fields: [anchorVerseId], references: [id], onDelete: Restrict)
+  fragmentStartWord QuranWord              @relation("StqhnQuestionFragmentStartWord", fields: [fragmentStartWordId], references: [id], onDelete: Restrict)
+  questions         MemorizationQuestion[]
+
+  @@index([videoId])
+  @@index([competitionBranch])
+  @@index([anchorVerseId])
 }

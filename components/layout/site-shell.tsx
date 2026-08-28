@@ -6,13 +6,15 @@ import {
   History,
   Settings,
   Brain,
-  ListChecks
+  ListChecks,
+  Trophy
 } from "lucide-react";
 import { productConfig } from "@/lib/config";
 
 const nav = [
   { href: "/memorization", label: "Latihan", icon: Brain },
   { href: "/evaluation", label: "Evaluasi", icon: ListChecks },
+  { href: "/stqhn", label: "STQHN 2025", icon: Trophy },
   { href: "/reader", label: "Mushaf", icon: BookOpen },
   { href: "/analytics", label: "Analitik", icon: BarChart3 },
   { href: "/history", label: "Riwayat", icon: History },
@@ -51,7 +53,7 @@ export function SiteShell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto max-w-6xl px-4 py-6 md:py-8">{children}</main>
       <nav
         aria-label="Navigasi bawah"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-6 border-t border-[var(--border)] bg-white md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-7 border-t border-[var(--border)] bg-white md:hidden"
       >
         {nav.map((item) => (
           <Link

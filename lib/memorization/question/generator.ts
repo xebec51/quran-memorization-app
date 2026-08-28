@@ -138,7 +138,7 @@ function nearestStartsToBucket(
   );
 }
 
-function initialWordRange(totalWords: number) {
+export function initialWordRange(totalWords: number) {
   if (totalWords <= 0)
     throw new Error("Cannot generate a prompt from an empty ayah");
   if (totalWords >= 9) return { minInitial: 4, maxInitial: 7 };

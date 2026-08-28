@@ -590,6 +590,15 @@ function publicQuestionFromRecord(
   const counts = hintCountsFromEvents(question.hintEvents);
   const revealedAyahCount = question.revealedAyahCount;
   const totalAyahCount = question.revealTotalAyahCount;
+  // orderInPackage is only nullable at the schema level to accommodate
+  // questions with no package at all (STQHN 2025 - see stqhnQuestionId);
+  // this function only ever runs on questions fetched as part of a real
+  // package's own questions relation, which always have one.
+  if (question.orderInPackage === null) {
+    throw new Error(
+      `Package question ${question.id} is missing orderInPackage - data integrity problem, not a user error.`
+    );
+  }
   return {
     id: question.id,
     order: question.orderInPackage,
@@ -757,10 +766,18 @@ function publicHintFromPayload(payload: Prisma.JsonValue) {
   return payload as unknown as PublicHint;
 }
 
+/**
+ * A question sourced from an external bank (STQHN 2025 - see
+ * stqhnQuestionId on MemorizationQuestion) has no packageId at all, since
+ * it is not part of the 604-page cycle plan - there is no package to
+ * possibly complete, so a null packageId is a no-op rather than a lookup
+ * error.
+ */
 async function completePackageIfReady(
   tx: Prisma.TransactionClient,
-  packageId: string
+  packageId: string | null
 ) {
+  if (!packageId) return false;
   // Single round trip instead of 3 (two counts + a separate package fetch):
   // a package only ever has productConfig.questionsPerPackage (4) questions,
   // so pulling their assessment presence inline is cheap, and this is the
