@@ -24,7 +24,8 @@ export async function GET(request: Request) {
       const where: Prisma.MemorizationQuestionWhereInput = {
         userId: user.id,
         ...(excludeQuestionId ? { id: { not: excludeQuestionId } } : {}),
-        assessment: { assessment: { in: ["MISSED", "PARTIAL"] } }
+        assessment: { assessment: { in: ["MISSED", "PARTIAL"] } },
+        evaluationClearedAt: null
       };
 
       let count = await prisma.memorizationQuestion.count({ where });
@@ -35,9 +36,12 @@ export async function GET(request: Request) {
       if (count === 0 && excludeQuestionId) {
         effectiveWhere = {
           userId: user.id,
-          assessment: { assessment: { in: ["MISSED", "PARTIAL"] } }
+          assessment: { assessment: { in: ["MISSED", "PARTIAL"] } },
+          evaluationClearedAt: null
         };
-        count = await prisma.memorizationQuestion.count({ where: effectiveWhere });
+        count = await prisma.memorizationQuestion.count({
+          where: effectiveWhere
+        });
       }
 
       if (count === 0) return jsonOk<EvaluationBankItem | null>(null);
@@ -66,7 +70,8 @@ export async function GET(request: Request) {
         questionId: question.id,
         fragmentText: fragments[0]?.fragmentText ?? "",
         lastResult: question.assessment.assessment,
-        lastAttemptAt: question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
+        lastAttemptAt:
+          question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
       });
     } catch (error) {
       return routeError(error);
