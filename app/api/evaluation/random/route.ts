@@ -21,17 +21,17 @@ export async function GET(request: Request) {
       const user = await requireUser();
       const { searchParams } = new URL(request.url);
       const excludeQuestionId = searchParams.get("exclude") || undefined;
-      const where = {
+      const where: Prisma.MemorizationQuestionWhereInput = {
         userId: user.id,
-        id: excludeQuestionId ? { not: excludeQuestionId } : undefined,
-        assessment: { assessment: { in: ["MISSED", "PARTIAL"] as const } }
-      } satisfies Prisma.MemorizationQuestionWhereInput;
+        ...(excludeQuestionId ? { id: { not: excludeQuestionId } } : {}),
+        assessment: { assessment: { in: ["MISSED", "PARTIAL"] } }
+      };
 
       let count = await prisma.memorizationQuestion.count({ where });
       let effectiveWhere: Prisma.MemorizationQuestionWhereInput = where;
 
-      // If the bank only contains the currently open question, still return
-      // it instead of making the random action look broken.
+      // Prefer a different question from the one currently open. When the
+      // bank contains only that one question, fall back to it gracefully.
       if (count === 0 && excludeQuestionId) {
         effectiveWhere = {
           userId: user.id,
