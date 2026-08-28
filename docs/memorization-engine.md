@@ -169,7 +169,7 @@ its own state:
   the bank without touching the main-cycle `QuestionAssessment`; any later
   non-`CORRECT` practice attempt resets it to `NULL`, bringing the
   question straight back. So "already evaluated and answered without a
-  mistake" reflects the *latest* practice attempt, not a one-time
+  mistake" reflects the _latest_ practice attempt, not a one-time
   exemption.
 - Reveal progress lives in its own `EvaluationSession` row
   (`(userId, questionId)` unique), completely separate from
