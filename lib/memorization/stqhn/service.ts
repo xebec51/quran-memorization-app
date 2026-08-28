@@ -1,110 +1,23 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
 import { bandForJuz } from "../cycle/constants";
-import { notFoundError } from "../errors";
+import { CryptoRandomSource } from "../random";
 import { retrySerialization } from "../persistence-retry";
-import { computeRevealBoundary } from "../reveal/service";
+import { computeRevealBoundariesBulk } from "../reveal/service";
+import { chooseStqhnPackageId } from "./allocation";
 import type {
+  RecallAssessment,
   RevealedAyah,
-  StqhnBankItem,
-  StqhnBankPage,
   StqhnHistoryItem,
   StqhnHistoryPage,
-  StqhnQuestionDto,
+  StqhnPackageDto,
+  StqhnPackageQuestion,
   StqhnSummary
 } from "../types";
-
-const bankSelect = {
-  id: true,
-  questionId: true,
-  competitionBranch: true,
-  competitionDay: true,
-  fragmentText: true,
-  questions: {
-    select: {
-      assessment: { select: { assessment: true, createdAt: true } }
-    }
-  }
-} satisfies Prisma.StqhnQuestionSelect;
-
-type BankRow = Prisma.StqhnQuestionGetPayload<{ select: typeof bankSelect }>;
-
-function bankItemFromRow(row: BankRow): StqhnBankItem {
-  // The caller's query already scopes `questions` to `where: { userId }`
-  // (see getStqhnBank below), and @@unique([userId, stqhnQuestionId]) on
-  // MemorizationQuestion guarantees at most one match - so row.questions
-  // holds zero or one item, never more, for whichever user issued the
-  // query.
-  const question = row.questions[0];
-  if (!question) {
-    return {
-      stqhnQuestionId: row.id,
-      questionCode: row.questionId,
-      competitionBranch: row.competitionBranch,
-      competitionDay: row.competitionDay,
-      fragmentText: row.fragmentText,
-      status: "NOT_ATTEMPTED",
-      lastAttemptAt: null
-    };
-  }
-  return {
-    stqhnQuestionId: row.id,
-    questionCode: row.questionId,
-    competitionBranch: row.competitionBranch,
-    competitionDay: row.competitionDay,
-    fragmentText: row.fragmentText,
-    status: question.assessment
-      ? question.assessment.assessment
-      : "IN_PROGRESS",
-    lastAttemptAt: question.assessment?.createdAt.toISOString() ?? null
-  };
-}
-
-/**
- * Lists the full STQHN 2025 bank (372 shared hifzh questions, the same
- * for every user) paginated by the bank's own stable questionId (e.g.
- * "V1-P01-Q01", globally unique and already in natural
- * video/participant/question order - see lib/quran/stqhn/import.ts).
- * Each item's status/lastAttemptAt reflect this user's own frozen
- * main-cycle assessment against it, if any - unaffected by later
- * Evaluation Practice re-attempts, exactly like the main flow and
- * Evaluation Bank.
- *
- * Deliberately does not select/return startVerseKey, endVerseKey, or
- * passageRange (see AGENT.md "Hidden Metadata Rule"): those identify
- * exactly which ayat to expect, so the client only ever sees the same
- * short Arabic fragment teaser used everywhere else pre-selection.
- */
-export async function getStqhnBank(
-  userId: string,
-  cursor: string | null,
-  limit: number
-): Promise<StqhnBankPage> {
-  return measureServerTiming("stqhn_bank", async () => {
-    const page = await paginateByCursor(
-      (args) =>
-        prisma.stqhnQuestion.findMany({
-          orderBy: { questionId: "asc" },
-          select: {
-            ...bankSelect,
-            questions: {
-              where: { userId },
-              select: bankSelect.questions.select
-            }
-          },
-          ...args
-        }),
-      cursor,
-      limit,
-      (row) => bankItemFromRow(row),
-      (row) => row.id
-    );
-    return page;
-  });
-}
 
 export async function getStqhnSummary(userId: string): Promise<StqhnSummary> {
   return measureServerTiming("stqhn_summary", async () => {
@@ -130,8 +43,139 @@ export async function getStqhnSummary(userId: string): Promise<StqhnSummary> {
   });
 }
 
+const packageQuestionSelect = {
+  id: true,
+  visibleFragmentText: true,
+  revealedAyahCount: true,
+  revealTotalAyahCount: true,
+  revealedVersesJson: true,
+  assessment: { select: { assessment: true } },
+  stqhnQuestion: { select: { questionNoForParticipant: true } }
+} satisfies Prisma.MemorizationQuestionSelect;
+
+type PackageQuestionRow = Prisma.MemorizationQuestionGetPayload<{
+  select: typeof packageQuestionSelect;
+}>;
+
+const packageSelect = {
+  id: true,
+  competitionDay: true,
+  competitionBranch: true,
+  participantDisplayNo: true
+} satisfies Prisma.StqhnPackageSelect;
+
+type PackageRow = Prisma.StqhnPackageGetPayload<{
+  select: typeof packageSelect;
+}>;
+
+function packageQuestionDto(
+  question: PackageQuestionRow
+): StqhnPackageQuestion {
+  return {
+    id: question.id,
+    order: question.stqhnQuestion!.questionNoForParticipant,
+    fragmentText: question.visibleFragmentText,
+    reveal: {
+      revealedAyahCount: question.revealedAyahCount,
+      totalAyahCount: question.revealTotalAyahCount,
+      isComplete: question.revealedAyahCount >= question.revealTotalAyahCount,
+      verses: question.revealedVersesJson as unknown as RevealedAyah[]
+    },
+    assessment:
+      (question.assessment?.assessment as RecallAssessment | undefined) ?? null
+  };
+}
+
+function packageDto(
+  pkg: PackageRow,
+  questionRows: PackageQuestionRow[]
+): StqhnPackageDto {
+  const questions = questionRows
+    .map(packageQuestionDto)
+    .sort((a, b) => a.order - b.order);
+  const allAssessed = questions.every((item) => item.assessment !== null);
+  return {
+    id: pkg.id,
+    competitionDay: pkg.competitionDay,
+    competitionBranch: pkg.competitionBranch,
+    participantDisplayNo: pkg.participantDisplayNo,
+    state: allAssessed ? "COMPLETED" : "IN_PROGRESS",
+    questions,
+    activeQuestionId:
+      questions.find((item) => item.assessment === null)?.id ??
+      questions[0]?.id ??
+      null
+  };
+}
+
+async function fetchPackageDto(
+  tx: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  stqhnPackageId: string
+): Promise<StqhnPackageDto> {
+  // Sequential, not Promise.all: an interactive transaction's tx client
+  // is bound to a single reserved connection and cannot run concurrent
+  // queries - see commit b5669f3, which hit exactly this ("P2028
+  // transaction already closed") in allocatePackage/computeRevealBoundary
+  // and fixed it the same way. Every caller here can pass either a real
+  // tx (inside getOrAllocateStqhnPackage's transaction) or the top-level
+  // prisma client (getCurrentStqhnPackage's read-only path), so this
+  // stays sequential unconditionally rather than branching on which one
+  // was passed.
+  const pkg = await tx.stqhnPackage.findUniqueOrThrow({
+    where: { id: stqhnPackageId },
+    select: packageSelect
+  });
+  const questionRows = await tx.memorizationQuestion.findMany({
+    where: { userId, stqhnQuestion: { stqhnPackageId } },
+    select: packageQuestionSelect
+  });
+  return packageDto(pkg, questionRows);
+}
+
+/**
+ * The user's current in-progress STQHN package - the most recently
+ * assigned one, unless it has since been fully assessed (in which case
+ * there is no "current" package: the next selection allocates a new one).
+ * At most one in-progress package ever exists per user, because
+ * getOrAllocateStqhnPackage always resumes an existing incomplete package
+ * instead of allocating a second one on top of it.
+ */
+async function findActivePackage(
+  tx: Prisma.TransactionClient | typeof prisma,
+  userId: string
+): Promise<StqhnPackageDto | null> {
+  const mostRecent = await tx.memorizationQuestion.findFirst({
+    where: { userId, stqhnQuestionId: { not: null } },
+    orderBy: { createdAt: "desc" },
+    select: { stqhnQuestion: { select: { stqhnPackageId: true } } }
+  });
+  if (!mostRecent?.stqhnQuestion) return null;
+  const dto = await fetchPackageDto(
+    tx,
+    userId,
+    mostRecent.stqhnQuestion.stqhnPackageId
+  );
+  return dto.state === "COMPLETED" ? null : dto;
+}
+
+/**
+ * Read-only lookup of the user's current in-progress package, for the SSR
+ * initial page load - mirrors getCurrentPackage for the main cycle. Never
+ * allocates, so a fresh user (or one whose last package is complete) gets
+ * null here and only gets a package via getOrAllocateStqhnPackage.
+ */
+export async function getCurrentStqhnPackage(
+  userId: string
+): Promise<StqhnPackageDto | null> {
+  return measureServerTiming("stqhn_current_package", () =>
+    findActivePackage(prisma, userId)
+  );
+}
+
 const stqhnSourceForCreateSelect = {
   id: true,
+  questionNoForParticipant: true,
   anchorVerseId: true,
   fragmentStartWordId: true,
   initialWordCount: true,
@@ -147,135 +191,146 @@ const stqhnSourceForCreateSelect = {
   fragmentStartWord: { select: { lineNumber: true } }
 } satisfies Prisma.StqhnQuestionSelect;
 
-const attemptQuestionSelect = {
-  id: true,
-  visibleFragmentText: true,
-  revealedAyahCount: true,
-  revealTotalAyahCount: true,
-  revealedVersesJson: true,
-  assessment: { select: { assessment: true } }
-} satisfies Prisma.MemorizationQuestionSelect;
+/**
+ * Creates every MemorizationQuestion row for one STQHN package in a
+ * single batch (computeRevealBoundariesBulk + createMany), the same
+ * up-front-not-lazy shape as the main cycle's allocatePackage - so the
+ * package arrives with all 4 questions ready and an activeQuestionId,
+ * rather than lazily creating each one as the user reaches it.
+ */
+async function allocateStqhnPackage(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  stqhnPackageId: string
+): Promise<StqhnPackageDto> {
+  // Only the package's own questions are needed here - the package DTO
+  // itself is built by the fetchPackageDto call below, which re-reads it
+  // fresh alongside the just-created MemorizationQuestion rows.
+  const sources = await tx.stqhnQuestion.findMany({
+    where: { stqhnPackageId },
+    orderBy: { questionNoForParticipant: "asc" },
+    select: stqhnSourceForCreateSelect
+  });
 
-function questionDto(
-  stqhnQuestionId: string,
-  question: {
-    id: string;
-    visibleFragmentText: string;
-    revealedAyahCount: number;
-    revealTotalAyahCount: number;
-    revealedVersesJson: Prisma.JsonValue;
-    assessment: { assessment: string } | null;
+  const boundaries = await computeRevealBoundariesBulk(
+    tx,
+    sources.map((source) => ({
+      anchorVerseId: source.anchorVerseId,
+      primaryPageNumber: source.anchorVerse.pageNumber,
+      fragmentStartLineNumber: source.fragmentStartWord.lineNumber
+    }))
+  );
+
+  const questionRows = sources.map((source, index) => ({
+    id: randomUUID(),
+    userId,
+    stqhnQuestionId: source.id,
+    state: "ACTIVE" as const,
+    primaryPageNumber: source.anchorVerse.pageNumber,
+    juzNumber: source.anchorVerse.juzNumber,
+    juzBand: bandForJuz(source.anchorVerse.juzNumber),
+    surahId: source.anchorVerse.chapterId,
+    anchorVerseId: source.anchorVerseId,
+    anchorVerseKey: source.anchorVerse.verseKey,
+    pagePositionBucket: "START" as const,
+    fragmentStartWordId: source.fragmentStartWordId,
+    initialWordCount: source.initialWordCount,
+    visibleWordCount: source.initialWordCount,
+    visibleFragmentText: source.fragmentText,
+    revealBoundaryVerseId: boundaries[index].boundaryVerseId,
+    revealTotalAyahCount: boundaries[index].totalAyahCount,
+    revealedVersesJson: [] as unknown as Prisma.InputJsonValue
+  }));
+
+  try {
+    await tx.memorizationQuestion.createMany({ data: questionRows });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      // Lost a race to a concurrent allocation of the same package for
+      // this user (double-click/double-tap, or two open tabs) -
+      // @@unique([userId, stqhnQuestionId]) means the winner already
+      // created exactly the rows this call would have, so resume them
+      // instead of surfacing a spurious conflict for what the user
+      // experiences as a single click. getOrAllocateStqhnPackage never
+      // knowingly re-picks an already-completed package (see its own
+      // doc comment), so in practice this is the only way this branch
+      // is reached - a genuine concurrent pick of the SAME still-fresh
+      // package, not a stale/completed one.
+      return fetchPackageDto(tx, userId, stqhnPackageId);
+    }
+    throw error;
   }
-): StqhnQuestionDto {
-  return {
-    questionId: question.id,
-    stqhnQuestionId,
-    fragmentText: question.visibleFragmentText,
-    reveal: {
-      revealedAyahCount: question.revealedAyahCount,
-      totalAyahCount: question.revealTotalAyahCount,
-      isComplete: question.revealedAyahCount >= question.revealTotalAyahCount,
-      verses: question.revealedVersesJson as unknown as RevealedAyah[]
-    },
-    assessment:
-      (question.assessment?.assessment as StqhnQuestionDto["assessment"]) ??
-      null
-  };
+
+  return fetchPackageDto(tx, userId, stqhnPackageId);
 }
 
 /**
- * Gets or lazily creates the per-user MemorizationQuestion for an STQHN
- * bank item - the same "get or create" shape as
- * lib/memorization/evaluation/service.ts's getOrCreateEvaluationSession,
- * just producing a real MemorizationQuestion (so reveal/hint/assessment
- * all reuse the existing endpoints unmodified) instead of an
- * EvaluationSession.
+ * Gets the user's current in-progress STQHN package, or allocates a new
+ * one at random - "diacak sesuai paketnya" - never repeating a package
+ * the user has already fully completed (every one of its questions
+ * assessed, correct or missed) as long as an untried package remains.
  *
- * Created once per (user, stqhnQuestion) - enforced by
- * @@unique([userId, stqhnQuestionId]) - and then permanent: revisiting
- * the same bank item always resumes the same row, whatever its current
- * reveal/assessment state. cycleId/packageId/orderInPackage are left
- * null (this question is not part of the 604-page cycle);
- * pagePositionBucket is set to "START" as a fixed convention for every
- * STQHN question, since the fragment always starts at the beginning of
- * its anchor ayah - there is no page-region selection to record the way
- * there is for a cycle-plan-generated question.
+ * Once every existing package has been completed at least once, there is
+ * no fresh package left to hand out: unlike the main cycle's wildcard
+ * deck (which reshuffles because a new cycle always generates brand-new
+ * MemorizationQuestion rows), an STQHN question's MemorizationQuestion
+ * row is permanent per (userId, stqhnQuestionId) - re-picking an
+ * already-completed package could only ever resurface its old, unchanged
+ * assessment, never offer a genuine new attempt. Rather than silently
+ * serving that stale, already-graded package on a loop, this throws
+ * allStqhnPackagesCompletedError so the UI can show an honest "you've
+ * finished everything" state and point to Riwayat STQHN instead.
  */
-export async function getOrCreateStqhnAttempt(
-  userId: string,
-  stqhnQuestionId: string
-): Promise<StqhnQuestionDto> {
-  return measureServerTiming("stqhn_attempt_get_or_create", () =>
+export async function getOrAllocateStqhnPackage(
+  userId: string
+): Promise<StqhnPackageDto> {
+  return measureServerTiming("stqhn_package_allocate", () =>
     retrySerialization(() =>
       prisma.$transaction(
         async (tx) => {
-          const existing = await tx.memorizationQuestion.findUnique({
-            where: { userId_stqhnQuestionId: { userId, stqhnQuestionId } },
-            select: attemptQuestionSelect
-          });
-          if (existing) {
-            return questionDto(stqhnQuestionId, existing);
-          }
+          const active = await findActivePackage(tx, userId);
+          if (active) return active;
 
-          const source = await tx.stqhnQuestion.findUnique({
-            where: { id: stqhnQuestionId },
-            select: stqhnSourceForCreateSelect
-          });
-          if (!source) throw notFoundError();
-
-          const boundary = await computeRevealBoundary(
-            tx,
-            source.anchorVerseId,
-            source.anchorVerse.pageNumber,
-            source.fragmentStartWord.lineNumber
+          // Every package this user has ever been assigned, and whether
+          // every one of its questions is assessed for them - the
+          // "already tried" pool a fresh pick must avoid. Package size
+          // varies (this user's own assigned rows for it), so a package
+          // only counts as completed once its assessedCount matches its
+          // own total, not a fixed constant.
+          const progress = await tx.$queryRaw<
+            { packageId: string; total: number; assessedCount: number }[]
+          >(Prisma.sql`
+            SELECT sq."stqhnPackageId" AS "packageId",
+                   COUNT(*)::int AS "total",
+                   COUNT(qa.id)::int AS "assessedCount"
+            FROM "MemorizationQuestion" mq
+            JOIN "StqhnQuestion" sq ON sq.id = mq."stqhnQuestionId"
+            LEFT JOIN "QuestionAssessment" qa ON qa."questionId" = mq.id
+            WHERE mq."userId" = ${userId}
+            GROUP BY sq."stqhnPackageId"
+          `);
+          const completedIds = new Set(
+            progress
+              .filter((row) => row.total === row.assessedCount)
+              .map((row) => row.packageId)
           );
 
-          try {
-            const created = await tx.memorizationQuestion.create({
-              data: {
-                userId,
-                stqhnQuestionId,
-                state: "ACTIVE",
-                primaryPageNumber: source.anchorVerse.pageNumber,
-                juzNumber: source.anchorVerse.juzNumber,
-                juzBand: bandForJuz(source.anchorVerse.juzNumber),
-                surahId: source.anchorVerse.chapterId,
-                anchorVerseId: source.anchorVerseId,
-                anchorVerseKey: source.anchorVerse.verseKey,
-                pagePositionBucket: "START",
-                fragmentStartWordId: source.fragmentStartWordId,
-                initialWordCount: source.initialWordCount,
-                visibleWordCount: source.initialWordCount,
-                visibleFragmentText: source.fragmentText,
-                revealBoundaryVerseId: boundary.boundaryVerseId,
-                revealTotalAyahCount: boundary.totalAyahCount
-              },
-              select: attemptQuestionSelect
-            });
-            return questionDto(stqhnQuestionId, created);
-          } catch (error) {
-            if (
-              error instanceof Prisma.PrismaClientKnownRequestError &&
-              error.code === "P2002"
-            ) {
-              // Lost a race to a concurrent selection of the same bank
-              // item (e.g. a double-click/double-tap) - @@unique([userId,
-              // stqhnQuestionId]) means the winner's row is exactly what
-              // this call would have returned anyway, so resume it
-              // instead of surfacing a spurious conflict for what the
-              // user experiences as a single click.
-              const winner = await tx.memorizationQuestion.findUniqueOrThrow({
-                where: { userId_stqhnQuestionId: { userId, stqhnQuestionId } },
-                select: attemptQuestionSelect
-              });
-              return questionDto(stqhnQuestionId, winner);
-            }
-            throw error;
-          }
+          const allPackages = await tx.stqhnPackage.findMany({
+            select: { id: true }
+          });
+          const chosenId = chooseStqhnPackageId(
+            allPackages.map((item) => item.id),
+            completedIds,
+            new CryptoRandomSource()
+          );
+          return allocateStqhnPackage(tx, userId, chosenId);
         },
         {
           isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-          timeout: 15_000
+          timeout: 20_000
         }
       )
     )

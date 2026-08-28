@@ -209,9 +209,56 @@ export async function importStqhnQuestions(
     else wordsByVerseId.set(word.verseId, [word]);
   }
 
+  // One StqhnPackage per (videoId, competitionBranch, participantDisplayNo)
+  // - the competition's own natural grouping of one participant's 4
+  // questions (see the model's doc comment in prisma/schema.prisma for why
+  // competitionBranch is part of the key). Upserted by that 3-part unique
+  // constraint, same idempotency approach as StqhnQuestion's own
+  // masterBankId upsert, so re-importing never duplicates packages either.
+  const packageKeys = new Map<
+    string,
+    {
+      videoId: string;
+      competitionBranch: "HIFZH_30_JUZ_INDEPENDENT" | "TAFSIR_ARABIC";
+      participantDisplayNo: number;
+      competitionDay: number;
+    }
+  >();
+  for (const record of hifzhRecords) {
+    const key = `${record.video_id} ${record.competition_branch} ${record.participant_display_no}`;
+    if (!packageKeys.has(key)) {
+      packageKeys.set(key, {
+        videoId: record.video_id,
+        competitionBranch: record.competition_branch as
+          "HIFZH_30_JUZ_INDEPENDENT" | "TAFSIR_ARABIC",
+        participantDisplayNo: record.participant_display_no,
+        competitionDay: record.competition_day
+      });
+    }
+  }
+
   await prisma.$transaction(
     async (tx) => {
+      const packageIdByKey = new Map<string, string>();
+      for (const [key, pkg] of packageKeys) {
+        const row = await tx.stqhnPackage.upsert({
+          where: {
+            videoId_competitionBranch_participantDisplayNo: {
+              videoId: pkg.videoId,
+              competitionBranch: pkg.competitionBranch,
+              participantDisplayNo: pkg.participantDisplayNo
+            }
+          },
+          create: pkg,
+          update: { competitionDay: pkg.competitionDay },
+          select: { id: true }
+        });
+        packageIdByKey.set(key, row.id);
+      }
+
       for (const record of hifzhRecords) {
+        const packageKey = `${record.video_id} ${record.competition_branch} ${record.participant_display_no}`;
+        const stqhnPackageId = packageIdByKey.get(packageKey)!;
         const anchorVerseId = anchorVerseIdByKey.get(record.start_verse_key)!;
         const verseWords = wordsByVerseId.get(anchorVerseId);
         if (!verseWords || verseWords.length === 0) {
@@ -245,6 +292,7 @@ export async function importStqhnQuestions(
           auditNote: record.audit_note,
           sourceTranscript: optionalString(record.source_transcript),
           sourceYoutubeUrl: record.source_youtube_url,
+          stqhnPackageId,
           anchorVerseId,
           fragmentStartWordId: verseWords[0].id,
           initialWordCount,

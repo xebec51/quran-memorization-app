@@ -58,6 +58,20 @@ run("STQHN 2025 import", () => {
     // this source file has none that aren't HIFZH_PROMPT).
     expect(byBranch.HIFZH_30_JUZ_INDEPENDENT).toBe(220);
     expect(byBranch.TAFSIR_ARABIC).toBe(152);
+
+    // The competition's own "paket" grouping - (videoId, competitionBranch,
+    // participantDisplayNo) - partitions all 372 records into exactly 93
+    // packages of exactly 4 questions each (verified directly against the
+    // source JSON; see prisma/schema.prisma's StqhnPackage doc comment for
+    // why competitionBranch must be part of the key).
+    const packageTotal = await prisma.stqhnPackage.count();
+    expect(packageTotal).toBe(93);
+    const packageSizes = await prisma.stqhnQuestion.groupBy({
+      by: ["stqhnPackageId"],
+      _count: { _all: true }
+    });
+    expect(packageSizes).toHaveLength(93);
+    expect(packageSizes.every((row) => row._count._all === 4)).toBe(true);
   });
 
   it("is idempotent - re-running against the same file changes nothing further", async () => {
@@ -160,8 +174,15 @@ run("STQHN 2025 import", () => {
     });
     expect(excluded).toBeNull();
 
+    // Clean up both the question and the StqhnPackage importStqhnQuestions
+    // created for it (onDelete: Restrict means the package must go after
+    // its last question, not before - leaving it would orphan a
+    // zero-question package that skews packageTotal in the test above on
+    // a re-run).
+    const importedPackageId = imported!.stqhnPackageId;
     await prisma.stqhnQuestion.delete({
       where: { masterBankId: `SYNTHETIC-${runId}-HIFZH` }
     });
+    await prisma.stqhnPackage.delete({ where: { id: importedPackageId } });
   });
 });

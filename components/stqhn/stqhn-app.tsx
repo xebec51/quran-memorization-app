@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   CheckCircle2,
   Eye,
@@ -18,18 +18,6 @@ import { AssessmentForm } from "@/components/memorization/assessment-form";
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
 type CompetitionBranch = "HIFZH_30_JUZ_INDEPENDENT" | "TAFSIR_ARABIC";
 
-type BankItem = {
-  stqhnQuestionId: string;
-  questionCode: string;
-  competitionBranch: CompetitionBranch;
-  competitionDay: number;
-  fragmentText: string;
-  status: "NOT_ATTEMPTED" | "IN_PROGRESS" | Assessment;
-  lastAttemptAt: string | null;
-};
-
-type BankPage = { items: BankItem[]; nextCursor: string | null };
-
 type RevealedAyah = {
   verseKey: string;
   text: string;
@@ -38,17 +26,29 @@ type RevealedAyah = {
   page: number;
 };
 
-type QuestionDto = {
-  questionId: string;
-  stqhnQuestionId: string;
+type RevealProgress = {
+  revealedAyahCount: number;
+  totalAyahCount: number;
+  isComplete: boolean;
+  verses: RevealedAyah[];
+};
+
+type PackageQuestion = {
+  id: string;
+  order: number;
   fragmentText: string;
-  reveal: {
-    revealedAyahCount: number;
-    totalAyahCount: number;
-    isComplete: boolean;
-    verses: RevealedAyah[];
-  };
+  reveal: RevealProgress;
   assessment: Assessment | null;
+};
+
+type PackageDto = {
+  id: string;
+  competitionDay: number;
+  competitionBranch: CompetitionBranch;
+  participantDisplayNo: number;
+  state: "IN_PROGRESS" | "COMPLETED";
+  questions: PackageQuestion[];
+  activeQuestionId: string | null;
 };
 
 type HistoryItem = {
@@ -76,279 +76,269 @@ type Summary = {
   missedCount: number;
 };
 
-type JustGraded = {
+type PendingAction = "package" | "reveal" | "reveal-all" | null;
+
+type RevealMutation = RevealProgress & { questionId: string };
+
+type AssessmentMutation = {
+  questionId: string;
   assessment: Assessment;
   belCount: number;
   tuntunCount: number;
 };
 
+function branchLabel(branch: CompetitionBranch) {
+  return branch === "HIFZH_30_JUZ_INDEPENDENT" ? "30 Juz" : "Tafsir";
+}
+
+function assessmentLabel(assessment: Assessment | null) {
+  if (assessment === "CORRECT") return "Benar";
+  if (assessment === "PARTIAL") return "Sebagian benar";
+  return "Belum ingat";
+}
+
+function firstActiveIndex(pkg: PackageDto) {
+  if (pkg.activeQuestionId) {
+    const index = pkg.questions.findIndex(
+      (item) => item.id === pkg.activeQuestionId
+    );
+    if (index >= 0) return index;
+  }
+  return 0;
+}
+
 export function StqhnApp({
-  initialBank,
+  initialPackage,
   initialHistory,
   initialSummary
 }: {
-  initialBank: BankPage;
+  initialPackage: PackageDto | null;
   initialHistory: HistoryPage;
   initialSummary: Summary;
 }) {
-  const [bank, setBank] = useState(initialBank);
+  const [pkg, setPkg] = useState<PackageDto | null>(initialPackage);
+  const [activeIndex, setActiveIndex] = useState(() =>
+    initialPackage ? firstActiveIndex(initialPackage) : 0
+  );
   const [history, setHistory] = useState(initialHistory);
   const [summary, setSummary] = useState(initialSummary);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [question, setQuestion] = useState<QuestionDto | null>(null);
-  const [justGraded, setJustGraded] = useState<JustGraded | null>(null);
-  const [questionLoading, setQuestionLoading] = useState(false);
-  const [revealPending, setRevealPending] = useState(false);
-  const [revealAllPending, setRevealAllPending] = useState(false);
-  const [submitPending, setSubmitPending] = useState(false);
-  const [loadingMoreBank, setLoadingMoreBank] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+  const [pendingAssessmentIds, setPendingAssessmentIds] = useState<Set<string>>(
+    new Set()
+  );
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
-  const [questionError, setQuestionError] = useState<string | null>(null);
-  const revealLockRef = useRef(false);
-  const revealAllLockRef = useRef(false);
-  const submitLockRef = useRef(false);
-  const gradedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Guards against a response for a question the user has since navigated
-  // away from overwriting whatever they're now looking at - same pattern
-  // as components/evaluation/evaluation-app.tsx's activeQuestionIdRef.
-  const activeQuestionIdRef = useRef<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const actionLockRef = useRef(false);
+  const inFlightAssessmentsRef = useRef(new Set<string>());
+  // Tracks which question the user is currently looking at, independent
+  // of React re-renders, so a slow assessment response landing after the
+  // user has already switched to a different question doesn't yank their
+  // view back to "the next unassessed one" out from under them.
+  const activeQuestionIdRef = useRef<string | null>(
+    initialPackage
+      ? (initialPackage.questions[firstActiveIndex(initialPackage)]?.id ?? null)
+      : null
+  );
 
-  useEffect(() => {
-    return () => {
-      if (gradedTimeoutRef.current) clearTimeout(gradedTimeoutRef.current);
-    };
-  }, []);
+  const question = pkg?.questions[activeIndex] ?? null;
+  const pendingAssessmentCount = pendingAssessmentIds.size;
+  const packageComplete = Boolean(
+    pkg &&
+    (pkg.state === "COMPLETED" ||
+      pkg.questions.every((item) => item.assessment))
+  );
+  const questionComplete = question?.assessment !== null;
+  const questionActionsBusy = pendingAction !== null;
+  const canUseQuestionActions = Boolean(
+    question && !questionActionsBusy && !questionComplete && !packageComplete
+  );
+  const canSwitchQuestion = Boolean(
+    question && (question.reveal.isComplete || questionComplete)
+  );
 
-  async function selectQuestion(item: BankItem) {
-    if (gradedTimeoutRef.current) {
-      clearTimeout(gradedTimeoutRef.current);
-      gradedTimeoutRef.current = null;
-    }
-    activeQuestionIdRef.current = item.stqhnQuestionId;
-    revealLockRef.current = false;
-    revealAllLockRef.current = false;
-    submitLockRef.current = false;
-    setRevealPending(false);
-    setRevealAllPending(false);
-    setSubmitPending(false);
-    setSelectedId(item.stqhnQuestionId);
-    setQuestion(null);
-    setJustGraded(null);
-    setListError(null);
-    setQuestionError(null);
-    setQuestionLoading(true);
+  function beginAction(action: Exclude<PendingAction, null>) {
+    if (actionLockRef.current) return false;
+    actionLockRef.current = true;
+    setPendingAction(action);
+    setError(null);
+    return true;
+  }
+
+  function endAction() {
+    actionLockRef.current = false;
+    setPendingAction(null);
+  }
+
+  async function loadPackage() {
+    if (pendingAssessmentCount > 0 || !beginAction("package")) return;
     try {
-      const data = await apiFetch<QuestionDto>("/api/stqhn/start", {
-        stqhnQuestionId: item.stqhnQuestionId
-      });
-      if (activeQuestionIdRef.current !== item.stqhnQuestionId) return;
-      setQuestion(data);
-      // /api/stqhn/start creates the underlying MemorizationQuestion row
-      // on first selection (getOrCreateStqhnAttempt), which is also the
-      // moment the server's own getStqhnSummary starts counting this
-      // question as attempted - reflect that locally now rather than
-      // leaving "Sudah dicoba" and this item's badge stale until a full
-      // reload, for however long the user reveals/thinks before grading.
-      if (item.status === "NOT_ATTEMPTED") {
-        setBank((current) => ({
-          ...current,
-          items: current.items.map((bankItem) =>
-            bankItem.stqhnQuestionId === item.stqhnQuestionId
-              ? { ...bankItem, status: "IN_PROGRESS" }
-              : bankItem
-          )
-        }));
-        setSummary((current) => ({
-          ...current,
-          attemptedCount: current.attemptedCount + 1
-        }));
-      }
+      const data = await apiFetch<PackageDto>("/api/stqhn/package");
+      const nextIndex = firstActiveIndex(data);
+      setPkg(data);
+      setActiveIndex(nextIndex);
+      activeQuestionIdRef.current = data.questions[nextIndex]?.id ?? null;
+      // loadPackage is only ever called with no active package (initial
+      // "Mulai latihan") or after the current one just completed ("Paket
+      // berikutnya") - getOrAllocateStqhnPackage never resumes in either
+      // case, so this response is always a freshly allocated package,
+      // and every one of its questions is newly "attempted" server-side.
+      setSummary((current) => ({
+        ...current,
+        attemptedCount: current.attemptedCount + data.questions.length
+      }));
     } catch (err) {
-      if (activeQuestionIdRef.current !== item.stqhnQuestionId) return;
-      setListError(
-        err instanceof Error ? err.message : "Gagal memuat soal STQHN."
-      );
-      setSelectedId(null);
+      setError(err instanceof Error ? err.message : "Gagal memuat paket.");
     } finally {
-      if (activeQuestionIdRef.current === item.stqhnQuestionId) {
-        setQuestionLoading(false);
-      }
+      endAction();
     }
   }
 
+  function applyRevealMutation(data: RevealMutation) {
+    setPkg((current) =>
+      current
+        ? {
+            ...current,
+            questions: current.questions.map((item) =>
+              item.id === data.questionId
+                ? {
+                    ...item,
+                    reveal: {
+                      revealedAyahCount: data.revealedAyahCount,
+                      totalAyahCount: data.totalAyahCount,
+                      isComplete: data.isComplete,
+                      verses: data.verses
+                    }
+                  }
+                : item
+            )
+          }
+        : current
+    );
+  }
+
   async function revealNext() {
-    if (!question || revealLockRef.current || question.reveal.isComplete)
-      return;
-    const stqhnQuestionId = question.stqhnQuestionId;
-    revealLockRef.current = true;
-    setRevealPending(true);
-    setQuestionError(null);
+    if (!question || !canUseQuestionActions) return;
+    if (!beginAction("reveal")) return;
     try {
-      const data = await apiFetch<{
-        questionId: string;
-        revealedAyahCount: number;
-        totalAyahCount: number;
-        isComplete: boolean;
-        verses: RevealedAyah[];
-      }>("/api/memorization/reveal", {
-        questionId: question.questionId,
+      const data = await apiFetch<RevealMutation>("/api/memorization/reveal", {
+        questionId: question.id,
         expectedRevealedCount: question.reveal.revealedAyahCount
       });
-      if (activeQuestionIdRef.current !== stqhnQuestionId) return;
-      setQuestion((current) =>
-        current ? { ...current, reveal: data } : current
-      );
+      applyRevealMutation(data);
     } catch (err) {
-      if (activeQuestionIdRef.current !== stqhnQuestionId) return;
-      setQuestionError(
+      setError(
         err instanceof Error ? err.message : "Gagal membuka ayat berikutnya."
       );
     } finally {
-      revealLockRef.current = false;
-      if (activeQuestionIdRef.current === stqhnQuestionId) {
-        setRevealPending(false);
-      }
+      endAction();
     }
   }
 
   async function revealAll() {
-    if (!question || revealAllLockRef.current || question.reveal.isComplete)
-      return;
-    const stqhnQuestionId = question.stqhnQuestionId;
-    revealAllLockRef.current = true;
-    setRevealAllPending(true);
-    setQuestionError(null);
+    if (!question || !canUseQuestionActions) return;
+    if (!beginAction("reveal-all")) return;
+    const questionId = question.id;
     try {
-      const data = await apiFetch<{
-        questionId: string;
-        revealedAyahCount: number;
-        totalAyahCount: number;
-        isComplete: boolean;
-        verses: RevealedAyah[];
-      }>("/api/memorization/reveal-all", {
-        questionId: question.questionId
-      });
-      if (activeQuestionIdRef.current !== stqhnQuestionId) return;
-      setQuestion((current) =>
-        current ? { ...current, reveal: data } : current
+      const data = await apiFetch<RevealMutation>(
+        "/api/memorization/reveal-all",
+        { questionId }
       );
+      applyRevealMutation(data);
     } catch (err) {
-      if (activeQuestionIdRef.current !== stqhnQuestionId) return;
-      setQuestionError(
+      setError(
         err instanceof Error ? err.message : "Gagal membuka seluruh ayat."
       );
     } finally {
-      revealAllLockRef.current = false;
-      if (activeQuestionIdRef.current === stqhnQuestionId) {
-        setRevealAllPending(false);
-      }
+      endAction();
     }
   }
 
-  async function submitAssessment(belCount: number, tuntunCount: number) {
-    if (!question || !question.reveal.isComplete || submitLockRef.current)
+  async function assess(belCount: number, tuntunCount: number) {
+    if (!pkg || !question || inFlightAssessmentsRef.current.has(question.id))
       return;
-    const stqhnQuestionId = question.stqhnQuestionId;
-    submitLockRef.current = true;
-    setSubmitPending(true);
-    setQuestionError(null);
-    try {
-      const result = await apiFetch<{
-        questionId: string;
-        assessment: Assessment;
-        belCount: number;
-        tuntunCount: number;
-      }>("/api/memorization/assessment", {
-        questionId: question.questionId,
-        belCount,
-        tuntunCount
-      });
-      // Reselecting an already-graded question resumes the same fully-
-      // revealed row (getOrCreateStqhnAttempt), so re-submitting the same
-      // bel/tuntun pair is a valid, server-side idempotent replay (see
-      // submitAssessment in lib/memorization/service.ts) rather than a
-      // blocked action - but it must not re-count locally.
-      const previousStatus =
-        bank.items.find((item) => item.stqhnQuestionId === stqhnQuestionId)
-          ?.status ?? "NOT_ATTEMPTED";
-      const wasAlreadyAssessed =
-        previousStatus === "CORRECT" ||
-        previousStatus === "PARTIAL" ||
-        previousStatus === "MISSED";
-      setBank((current) => ({
-        ...current,
-        items: current.items.map((item) =>
-          item.stqhnQuestionId === stqhnQuestionId
-            ? {
-                ...item,
-                status: result.assessment,
-                lastAttemptAt: new Date().toISOString()
-              }
-            : item
-        )
-      }));
-      setSummary((current) => ({
-        ...current,
-        correctCount:
-          current.correctCount +
-          (!wasAlreadyAssessed && result.assessment === "CORRECT" ? 1 : 0),
-        missedCount:
-          current.missedCount +
-          (!wasAlreadyAssessed && result.assessment !== "CORRECT" ? 1 : 0)
-      }));
-      if (activeQuestionIdRef.current === stqhnQuestionId) {
-        setJustGraded({
-          assessment: result.assessment,
-          belCount: result.belCount,
-          tuntunCount: result.tuntunCount
-        });
-        gradedTimeoutRef.current = setTimeout(() => {
-          setSelectedId(null);
-          setQuestion(null);
-          setJustGraded(null);
-        }, 1800);
-      }
-    } catch (err) {
-      if (activeQuestionIdRef.current === stqhnQuestionId) {
-        setQuestionError(
-          err instanceof Error ? err.message : "Gagal menyimpan evaluasi."
-        );
-      }
-    } finally {
-      submitLockRef.current = false;
-      if (activeQuestionIdRef.current === stqhnQuestionId) {
-        setSubmitPending(false);
-      }
-    }
-  }
 
-  async function loadMoreBank() {
-    if (!bank.nextCursor || loadingMoreBank) return;
-    setListError(null);
-    setLoadingMoreBank(true);
+    const assessedQuestion = question;
+    const previousPackage = pkg;
+    const previousIndex = activeIndex;
+    // Re-selecting an already-assessed question and resubmitting is a
+    // valid, server-side idempotent replay (see submitAssessment in
+    // lib/memorization/service.ts) - it must not double-count locally.
+    const wasAlreadyAssessed = assessedQuestion.assessment !== null;
+
+    inFlightAssessmentsRef.current.add(assessedQuestion.id);
+    setPendingAssessmentIds((current) => {
+      const next = new Set(current);
+      next.add(assessedQuestion.id);
+      return next;
+    });
+    setError(null);
+
     try {
-      const page = await apiFetch<BankPage>(
-        `/api/stqhn/bank?cursor=${encodeURIComponent(bank.nextCursor)}&limit=20`,
-        undefined,
-        { method: "GET" }
+      const data = await apiFetch<AssessmentMutation>(
+        "/api/memorization/assessment",
+        { questionId: assessedQuestion.id, belCount, tuntunCount },
+        { keepalive: true }
       );
-      setBank((current) => ({
-        items: [...current.items, ...page.items],
-        nextCursor: page.nextCursor
-      }));
+      setPkg((current) => {
+        if (!current) return current;
+        const nextQuestions = current.questions.map((item) =>
+          item.id === data.questionId
+            ? { ...item, assessment: data.assessment }
+            : item
+        );
+        const nextComplete = nextQuestions.every((item) => item.assessment);
+        const nextActiveId =
+          nextQuestions.find((item) => !item.assessment)?.id ?? data.questionId;
+        // Only auto-advance if the user is still looking at the question
+        // they just graded - if they've since switched to another
+        // question in the package while this request was in flight, jump
+        // straight there instead of yanking them back to "the next
+        // unassessed one" out from under a request they didn't make.
+        if (!nextComplete && activeQuestionIdRef.current === data.questionId) {
+          const nextIndex = nextQuestions.findIndex(
+            (item) => item.id === nextActiveId
+          );
+          if (nextIndex >= 0) {
+            activeQuestionIdRef.current = nextActiveId;
+            setActiveIndex(nextIndex);
+          }
+        }
+        return {
+          ...current,
+          state: nextComplete ? "COMPLETED" : current.state,
+          questions: nextQuestions,
+          activeQuestionId: nextActiveId
+        };
+      });
+      if (!wasAlreadyAssessed) {
+        setSummary((current) => ({
+          ...current,
+          correctCount:
+            current.correctCount + (data.assessment === "CORRECT" ? 1 : 0),
+          missedCount:
+            current.missedCount + (data.assessment !== "CORRECT" ? 1 : 0)
+        }));
+      }
     } catch (err) {
-      setListError(
-        err instanceof Error ? err.message : "Gagal memuat bank soal STQHN."
+      setPkg(previousPackage);
+      setActiveIndex(previousIndex);
+      setError(
+        err instanceof Error
+          ? `Evaluasi belum tersimpan: ${err.message}`
+          : "Evaluasi belum tersimpan. Coba lagi."
       );
     } finally {
-      setLoadingMoreBank(false);
+      inFlightAssessmentsRef.current.delete(assessedQuestion.id);
+      setPendingAssessmentIds((current) => {
+        const next = new Set(current);
+        next.delete(assessedQuestion.id);
+        return next;
+      });
     }
   }
 
   async function loadMoreHistory() {
     if (!history.nextCursor || loadingMoreHistory) return;
-    setListError(null);
     setLoadingMoreHistory(true);
     try {
       const page = await apiFetch<HistoryPage>(
@@ -361,19 +351,13 @@ export function StqhnApp({
         nextCursor: page.nextCursor
       }));
     } catch (err) {
-      setListError(
+      setError(
         err instanceof Error ? err.message : "Gagal memuat riwayat STQHN."
       );
     } finally {
       setLoadingMoreHistory(false);
     }
   }
-
-  const revealButtonLabel = revealPending
-    ? "Membuka..."
-    : question && question.reveal.revealedAyahCount === 0
-      ? "Lihat Ayat Pertama"
-      : "Lihat Ayat Berikutnya";
 
   return (
     <div className="grid gap-4 pb-20">
@@ -384,7 +368,8 @@ export function StqhnApp({
         </h1>
         <p className="mt-1 text-[var(--muted)]">
           Bank soal hafalan asli dari Seleksi Tilawah Qur&apos;an dan Hafalan
-          Nasional 2025 - 372 soal, terpisah dari siklus 604 halaman.
+          Nasional 2025 - diacak per paket peserta, tidak berulang sebelum semua
+          paket dicoba.
         </p>
       </div>
 
@@ -416,179 +401,93 @@ export function StqhnApp({
         </div>
       </Card>
 
-      {listError ? (
+      {error ? (
         <Card role="alert" className="text-sm text-[var(--danger)]">
-          {listError}
+          {error}
         </Card>
       ) : null}
 
-      <Card>
-        <h2 className="font-semibold">Bank Soal STQHN 2025</h2>
-        <div className="mt-3 grid gap-2">
-          {bank.items.map((item) => (
-            <button
-              key={item.stqhnQuestionId}
-              type="button"
-              onClick={() => {
-                if (!questionLoading) selectQuestion(item);
-              }}
-              aria-disabled={questionLoading || undefined}
-              aria-label={`Soal ${item.questionCode}: ${statusLabel(item.status)}: ${item.fragmentText}`}
-              className={`rounded-md border p-3 text-left text-sm transition ${
-                questionLoading ? "pointer-events-none opacity-70" : ""
-              } ${
-                item.stqhnQuestionId === selectedId
-                  ? "border-[var(--primary)] bg-emerald-50"
-                  : "border-[var(--border)] bg-white hover:bg-slate-50"
-              }`}
-            >
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-xs font-medium text-[var(--muted)]">
-                  {item.questionCode} - Hari {item.competitionDay} -{" "}
-                  {branchLabel(item.competitionBranch)}
-                </span>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(item.status)}`}
-                >
-                  {statusLabel(item.status)}
-                </span>
-              </div>
-              <p
-                className="quran-text text-right text-xl"
-                translate="no"
-                lang="ar"
-                dir="rtl"
-              >
-                {item.fragmentText}
-              </p>
-            </button>
-          ))}
-        </div>
-        {bank.nextCursor ? (
-          <Button
-            variant="secondary"
-            className="mt-3"
-            disabled={loadingMoreBank}
-            onClick={loadMoreBank}
-          >
-            {loadingMoreBank ? "Memuat..." : "Muat lebih banyak"}
-          </Button>
-        ) : null}
-      </Card>
-
-      {selectedId && (questionLoading || question) ? (
-        <Card className="grid gap-4 border-l-4 border-l-[var(--primary)] tasmiq-panel-enter">
+      {!pkg || !question ? (
+        <Card className="grid gap-4">
           <div>
-            <h2 className="font-semibold">Latihan Soal STQHN</h2>
+            <h2 className="text-xl font-semibold">Latihan Soal STQHN</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ingat ayat berikut dari hafalan, buka satu per satu (atau
-              sekaligus) untuk memeriksa, lalu catat hasilnya.
+              Setiap sesi berisi 1 paket (4 soal dari satu peserta), dipilih
+              acak dan tidak akan berulang sampai semua paket pernah dicoba.
             </p>
           </div>
-          {questionError ? (
-            <p role="alert" className="text-sm text-[var(--danger)]">
-              {questionError}
-            </p>
-          ) : null}
-          {questionLoading || !question ? (
-            <p className="text-sm text-[var(--muted)]">Memuat soal...</p>
-          ) : justGraded ? (
-            <div
-              className={`rounded-md border p-4 text-sm ${
-                justGraded.assessment === "CORRECT"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : "border-amber-200 bg-amber-50 text-amber-900"
-              }`}
-            >
-              <p className="font-medium">
-                {justGraded.assessment === "CORRECT"
-                  ? "Benar - lulus soal ini."
-                  : "Belum ingat - soal ini otomatis masuk ke Evaluasi Latihan untuk dicoba lagi."}
-              </p>
-              <p className="mt-1 text-xs">
-                Bel: {justGraded.belCount} - Tuntun: {justGraded.tuntunCount}
-              </p>
-            </div>
-          ) : (
-            <>
-              <p
-                className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
-                translate="no"
-                lang="ar"
-                dir="rtl"
-              >
-                {question.fragmentText}
-                <span aria-hidden className="text-[var(--accent)]">
-                  {" "}
-                  ...
-                </span>
-              </p>
-
-              {question.reveal.verses.length > 0 ? (
-                <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
-                  <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
-                    Ayat {question.reveal.revealedAyahCount}/
-                    {question.reveal.totalAyahCount} terbuka
-                    {question.reveal.isComplete ? " - halaman ini selesai" : ""}
-                  </p>
-                  <div className="grid gap-3 p-4 pt-0">
-                    {question.reveal.verses.map((verse) => (
-                      <div key={verse.verseKey} className="grid gap-1">
-                        <p className="text-xs text-[var(--muted)]">
-                          {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
-                          Halaman {verse.page}
-                        </p>
-                        <p
-                          className="quran-text text-right text-3xl"
-                          translate="no"
-                          lang="ar"
-                          dir="rtl"
-                        >
-                          {verse.text}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--muted)]">
-                  Ayat {question.reveal.revealedAyahCount}/
-                  {question.reveal.totalAyahCount} terbuka
-                </p>
-              )}
-
-              {!question.reveal.isComplete ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Button
-                    onClick={revealNext}
-                    disabled={revealPending || revealAllPending}
-                  >
-                    <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={revealAll}
-                    disabled={revealPending || revealAllPending}
-                  >
-                    <FastForward aria-hidden className="h-4 w-4" />{" "}
-                    {revealAllPending
-                      ? "Membuka semua ayat..."
-                      : "Soal selesai dijawab"}
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
-                  <p className="text-sm font-medium">Evaluasi jawaban</p>
-                  <AssessmentForm
-                    onAssess={submitAssessment}
-                    pending={submitPending}
-                  />
-                </div>
-              )}
-            </>
-          )}
+          <Button onClick={loadPackage} disabled={pendingAction === "package"}>
+            {pendingAction === "package" ? "Memuat..." : "Mulai latihan"}
+          </Button>
         </Card>
-      ) : null}
+      ) : packageComplete ? (
+        <Card className="grid gap-4 tasmiq-panel-enter">
+          <div>
+            <h2 className="text-xl font-semibold">Paket selesai</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              Hari {pkg.competitionDay} - {branchLabel(pkg.competitionBranch)} -
+              Peserta {pkg.participantDisplayNo}:{" "}
+              {pkg.questions.filter((item) => item.assessment).length}/
+              {pkg.questions.length} soal sudah dievaluasi.
+            </p>
+          </div>
+          <Button
+            onClick={loadPackage}
+            disabled={pendingAction === "package" || pendingAssessmentCount > 0}
+          >
+            {pendingAction === "package" ? "Memuat..." : "Paket berikutnya"}
+          </Button>
+        </Card>
+      ) : (
+        <Card className="grid gap-5">
+          <div>
+            <p className="text-sm font-medium text-[var(--muted)]">
+              Hari {pkg.competitionDay} - {branchLabel(pkg.competitionBranch)} -
+              Peserta {pkg.participantDisplayNo}
+            </p>
+          </div>
+          <div className="grid grid-cols-4 gap-2" aria-label="Pertanyaan">
+            {pkg.questions.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                disabled={
+                  questionActionsBusy ||
+                  (index !== activeIndex && !canSwitchQuestion)
+                }
+                aria-label={
+                  index !== activeIndex && !canSwitchQuestion
+                    ? `Soal ${item.order} - buka seluruh ayat soal saat ini dahulu`
+                    : `Soal ${item.order}`
+                }
+                onClick={() => {
+                  activeQuestionIdRef.current = item.id;
+                  setActiveIndex(index);
+                }}
+                className={`rounded-md border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${
+                  index === activeIndex
+                    ? "border-[var(--primary)] bg-emerald-50"
+                    : item.assessment
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-[var(--border)] bg-white"
+                }`}
+              >
+                {item.order}
+              </button>
+            ))}
+          </div>
+          <QuestionPanel
+            key={question.id}
+            question={question}
+            pendingAction={pendingAction}
+            canUseQuestionActions={canUseQuestionActions}
+            pendingAssessment={pendingAssessmentIds.has(question.id)}
+            onRevealNext={revealNext}
+            onRevealAll={revealAll}
+            onAssess={assess}
+          />
+        </Card>
+      )}
 
       <Card>
         <div className="flex items-center gap-2">
@@ -612,9 +511,13 @@ export function StqhnApp({
                     {branchLabel(item.competitionBranch)} - {item.passageRange}
                   </span>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(item.assessment)}`}
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      item.assessment === "CORRECT"
+                        ? "bg-emerald-100 text-emerald-900"
+                        : "bg-amber-100 text-amber-900"
+                    }`}
                   >
-                    {statusLabel(item.assessment)}
+                    {assessmentLabel(item.assessment)}
                   </span>
                 </div>
                 <p
@@ -665,37 +568,126 @@ function Metric({
   value,
   className = ""
 }: {
-  icon: typeof ListChecks;
+  icon: typeof Trophy;
   label: string;
   value: number;
   className?: string;
 }) {
   return (
     <div className={`grid gap-1 ${className}`}>
-      <div className="flex items-center gap-2 text-[var(--muted)]">
-        <Icon aria-hidden className="h-4 w-4" />
-        <p className="text-xs">{label}</p>
+      <div className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+        <Icon aria-hidden className="h-3.5 w-3.5" />
+        {label}
       </div>
       <p className="text-xl font-semibold">{value}</p>
     </div>
   );
 }
 
-function branchLabel(branch: CompetitionBranch) {
-  return branch === "HIFZH_30_JUZ_INDEPENDENT" ? "30 Juz" : "Tafsir Arab";
-}
+function QuestionPanel({
+  question,
+  pendingAction,
+  canUseQuestionActions,
+  pendingAssessment,
+  onRevealNext,
+  onRevealAll,
+  onAssess
+}: {
+  question: PackageQuestion;
+  pendingAction: PendingAction;
+  canUseQuestionActions: boolean;
+  pendingAssessment: boolean;
+  onRevealNext: () => void;
+  onRevealAll: () => void;
+  onAssess: (belCount: number, tuntunCount: number) => void;
+}) {
+  const questionComplete = question.assessment !== null;
+  const reveal = question.reveal;
+  const assessmentOpen = reveal.isComplete;
+  const revealButtonLabel =
+    pendingAction === "reveal"
+      ? "Membuka..."
+      : reveal.revealedAyahCount === 0
+        ? "Lihat Ayat Pertama"
+        : "Lihat Ayat Berikutnya";
 
-function statusLabel(status: BankItem["status"]) {
-  if (status === "NOT_ATTEMPTED") return "Belum dicoba";
-  if (status === "IN_PROGRESS") return "Sedang berlangsung";
-  if (status === "CORRECT") return "Benar";
-  if (status === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
-}
-
-function statusBadgeClass(status: BankItem["status"]) {
-  if (status === "CORRECT") return "bg-emerald-100 text-emerald-800";
-  if (status === "NOT_ATTEMPTED") return "bg-slate-100 text-slate-700";
-  if (status === "IN_PROGRESS") return "bg-sky-100 text-sky-800";
-  return "bg-red-100 text-red-800";
+  return (
+    <div className="grid gap-5 tasmiq-panel-enter">
+      <div
+        className="quran-text min-h-44 rounded-md bg-[#fbfaf4] p-5 text-right text-4xl leading-loose md:text-5xl"
+        translate="no"
+        lang="ar"
+        dir="rtl"
+      >
+        {question.fragmentText}
+        <span aria-hidden className="text-[var(--accent)]">
+          {" "}
+          ...
+        </span>
+      </div>
+      {questionComplete ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          Soal ini sudah dievaluasi: {assessmentLabel(question.assessment)}
+          {question.assessment !== "CORRECT"
+            ? " - otomatis masuk ke Evaluasi Latihan untuk dicoba lagi."
+            : ""}
+        </div>
+      ) : null}
+      {pendingAssessment ? (
+        <div className="rounded-md bg-slate-50 p-3 text-sm text-[var(--muted)]">
+          Menyimpan evaluasi...
+        </div>
+      ) : null}
+      {reveal.verses.length > 0 ? (
+        <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+          <p className="text-sm text-[var(--muted)]">
+            Ayat {reveal.revealedAyahCount}/{reveal.totalAyahCount} terbuka
+            {reveal.isComplete ? " - halaman ini selesai" : ""}
+          </p>
+          {reveal.verses.map((verse) => (
+            <div key={verse.verseKey} className="grid gap-1">
+              <p className="text-xs text-[var(--muted)]">
+                {verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman{" "}
+                {verse.page}
+              </p>
+              <p
+                className="quran-text text-right text-3xl"
+                translate="no"
+                lang="ar"
+                dir="rtl"
+              >
+                {verse.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {!reveal.isComplete ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button
+            onClick={onRevealNext}
+            disabled={!canUseQuestionActions || reveal.isComplete}
+          >
+            <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={onRevealAll}
+            disabled={!canUseQuestionActions || reveal.isComplete}
+          >
+            <FastForward aria-hidden className="h-4 w-4" />{" "}
+            {pendingAction === "reveal-all"
+              ? "Membuka semua ayat..."
+              : "Soal selesai dijawab"}
+          </Button>
+        </div>
+      ) : null}
+      {assessmentOpen ? (
+        <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+          <p className="text-sm font-medium">Evaluasi jawaban</p>
+          <AssessmentForm onAssess={onAssess} pending={pendingAssessment} />
+        </div>
+      ) : null}
+    </div>
+  );
 }

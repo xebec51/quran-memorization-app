@@ -209,14 +209,46 @@ system exists for it.
 
 - `StqhnQuestion` (`prisma/schema.prisma`) is the global, shared bank
   content - one row per source `master_bank_id`, not per-user. A
-  per-user attempt is a lazily-created `MemorizationQuestion` row linked
-  via the nullable `stqhnQuestionId` FK, so it carries reveal state, hint
-  counts, and the `QuestionAssessment`/`EvaluationSession`/
-  `EvaluationAttempt` relations exactly like a main-cycle question -
-  `getOrCreateStqhnAttempt` (`lib/memorization/stqhn/service.ts`) is the
-  only STQHN-aware code in that whole path. `@@unique([userId,
-stqhnQuestionId])` is what makes selecting the same bank item twice
-  idempotent (get-or-create, never a duplicate row).
+  per-user attempt is a `MemorizationQuestion` row linked via the
+  nullable `stqhnQuestionId` FK, so it carries reveal state, hint counts,
+  and the `QuestionAssessment`/`EvaluationSession`/`EvaluationAttempt`
+  relations exactly like a main-cycle question - the package allocation
+  described below is the only STQHN-aware code in that whole path.
+  `@@unique([userId, stqhnQuestionId])` is what makes allocating the same
+  package twice idempotent (never a duplicate row per question).
+- `StqhnPackage` is the competition's own natural grouping of one
+  participant's 4 questions within one video/branch - the "paket" a user
+  practices one at a time. The grouping key is
+  `(videoId, competitionBranch, participantDisplayNo)`, a 3-part key, not
+  `participantDisplayNo` alone: the real source data shows
+  `HIFZH_30_JUZ_INDEPENDENT` and `TAFSIR_ARABIC` records within the same
+  video independently number their own participant/day counters from 1,
+  so the same numeric value can denote two entirely unrelated groups
+  without `competitionBranch` to disambiguate (verified against the full
+  372-record export - this key yields exactly 93 groups of exactly 4
+  questions each, a clean partition, vs. spurious cross-branch collisions
+  on the 2-part key). The migration that introduced this table backfills
+  it from the already-imported `StqhnQuestion` rows in the same
+  transaction as the schema change, so the column is added, populated,
+  and only then tightened to `NOT NULL` - never a two-step deploy.
+- `getOrAllocateStqhnPackage` (`lib/memorization/stqhn/service.ts`,
+  `POST /api/stqhn/package`) is the only entry point into STQHN practice -
+  there is no free-browse bank list. It resumes the user's current
+  in-progress package (the most recently allocated one, if not yet fully
+  assessed) or allocates a new one at random, the same "get existing or
+  allocate" shape as the main cycle's `getOrAllocateNextPackage`. A
+  package is never repeated while the user has an untried one remaining:
+  the candidate pool for a fresh pick excludes every package this user
+  has already fully assessed (a raw SQL group-by comparing each
+  package's assessed-question count against its total), and only resets
+  to the full catalog once every package has been completed at least
+  once - a wildcard-deck-style reshuffle rather than ever blocking on "no
+  more packages," mirroring the main cycle's own quota deck. Allocating a
+  package creates every one of its `MemorizationQuestion` rows up front
+  in one batch (`computeRevealBoundariesBulk` + `createMany`), the same
+  not-lazy shape as the main cycle's `allocatePackage`, so the client
+  receives a full package with an `activeQuestionId` rather than
+  creating each question as the user reaches it.
 - `MemorizationQuestion.cycleId`/`packageId`/`orderInPackage` are
   nullable specifically to host STQHN questions honestly: they are not
   part of any 604-page cycle or package, so cycle/package analytics
@@ -241,14 +273,14 @@ stqhnQuestionId])` is what makes selecting the same bank item twice
   them; the transcript files themselves are never read at runtime, only
   by this one-time import.
 - The source YouTube link is treated like any other hidden-metadata field
-  (see "Hidden Metadata Rule" in `AGENT.md`): `getStqhnBank` never
-  exposes it, since it is literally the recorded original answer.
+  (see "Hidden Metadata Rule" in `AGENT.md`): the package/allocation path
+  never exposes it, since it is literally the recorded original answer.
   `getStqhnHistory` includes it - as `sourceVideoUrl`, seeked to
   `timestampStartSec` - only because a history row exists solely for a
   question that has already been assessed.
-- Selecting a bank question reveals via the same
-  `computeRevealBoundary` used by the main cycle (see "Progressive
-  Reveal" above), anchored on the STQHN question's own page/line rather
+- Allocating a package reveals via the same `computeRevealBoundary`/
+  `computeRevealBoundariesBulk` used by the main cycle (see "Progressive
+  Reveal" above), anchored on each STQHN question's own page/line rather
   than a cycle-generated one; `pagePositionBucket` is fixed to `"START"`
   for every STQHN question as a deliberate simplification (there is no
   cycle-driven page position to derive it from).

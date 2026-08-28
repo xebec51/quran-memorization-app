@@ -468,6 +468,11 @@ model StqhnQuestion {
   // as null rather than a fabricated value.
   timestampEnd             String?
   timestampEndSec          Float?
+  // The competition's own natural grouping of this participant's 4
+  // questions within this video/branch (see StqhnPackage below) -
+  // required, since every HIFZH_PROMPT record belongs to exactly one such
+  // group.
+  stqhnPackageId           String
   startVerseKey            String
   endVerseKey              String
   passageRange             String
@@ -491,9 +496,38 @@ model StqhnQuestion {
 
   anchorVerse       QuranVerse             @relation("StqhnQuestionAnchorVerse", fields: [anchorVerseId], references: [id], onDelete: Restrict)
   fragmentStartWord QuranWord              @relation("StqhnQuestionFragmentStartWord", fields: [fragmentStartWordId], references: [id], onDelete: Restrict)
+  stqhnPackage      StqhnPackage           @relation(fields: [stqhnPackageId], references: [id], onDelete: Restrict)
   questions         MemorizationQuestion[]
 
   @@index([videoId])
   @@index([competitionBranch])
   @@index([anchorVerseId])
+  @@index([stqhnPackageId])
+}
+
+// The competition's own grouping of one participant's questions within
+// one video/branch - the source data's natural "paket" (see
+// docs/memorization-engine.md "STQHN 2025 Question Bank" for why this is
+// a 3-part key, not participantDisplayNo alone: HIFZH_30_JUZ_INDEPENDENT
+// and TAFSIR_ARABIC records within the same video independently number
+// their own participant/day counters from 1, so the same numeric value
+// denotes two unrelated groups without competitionBranch to disambiguate).
+// Global, shared bank content like StqhnQuestion - not per-user. Practice
+// allocation (which package a user is given, and in what randomized,
+// no-repeat-until-exhausted order) is computed against this fixed catalog
+// in lib/memorization/stqhn/service.ts, the same way StqhnQuestion's
+// per-user attempts are computed against the fixed question catalog.
+model StqhnPackage {
+  id                   String                 @id @default(cuid())
+  videoId              String
+  competitionBranch    StqhnCompetitionBranch
+  participantDisplayNo Int
+  competitionDay       Int
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+
+  questions StqhnQuestion[]
+
+  @@unique([videoId, competitionBranch, participantDisplayNo])
+  @@index([competitionBranch])
 }

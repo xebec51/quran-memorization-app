@@ -168,42 +168,38 @@ export type EvaluationHistorySummary = {
 export type StqhnCompetitionBranch =
   "HIFZH_30_JUZ_INDEPENDENT" | "TAFSIR_ARABIC";
 
-// Bank listing item, shown before a question is selected - no
-// start_verse_key/end_verse_key/passage_range here (see AGENT.md "Hidden
-// Metadata Rule"): those identify exactly which ayat to expect, so like
-// every other bank/reveal surface in this app, only the short Arabic
-// fragment teaser is shown pre-selection. status reflects this user's
-// frozen main-cycle QuestionAssessment for this question, if any -
-// unaffected by any later Evaluation Practice re-attempts, exactly like
-// the main flow and Evaluation Bank.
-export type StqhnBankItem = {
-  stqhnQuestionId: string;
-  questionCode: string;
-  competitionBranch: StqhnCompetitionBranch;
-  competitionDay: number;
-  fragmentText: string;
-  status: "NOT_ATTEMPTED" | "IN_PROGRESS" | RecallAssessment;
-  lastAttemptAt: string | null;
-};
-
-export type StqhnBankPage = {
-  items: StqhnBankItem[];
-  nextCursor: string | null;
-};
-
-// Returned when starting/resuming an STQHN question - questionId here is
-// the underlying MemorizationQuestion.id, the same id used to call the
-// existing /api/memorization/reveal, /api/memorization/reveal-all, and
+// One question within an allocated STQHN package - id is the underlying
+// MemorizationQuestion.id, the same id used to call the existing
+// /api/memorization/reveal, /api/memorization/reveal-all, and
 // /api/memorization/assessment endpoints unmodified. No hint UI in this
-// first STQHN integration (not part of the request), even though the
+// STQHN integration (not part of the request), even though the
 // underlying MemorizationQuestion row is fully hint-capable like any
 // other - /api/memorization/hint would work against it unmodified too.
-export type StqhnQuestionDto = {
-  questionId: string;
-  stqhnQuestionId: string;
+// No start_verse_key/end_verse_key/passage_range here (see AGENT.md
+// "Hidden Metadata Rule"): those identify exactly which ayat to expect,
+// so only the short Arabic fragment teaser is shown pre-assessment.
+export type StqhnPackageQuestion = {
+  id: string;
+  order: number;
   fragmentText: string;
   reveal: RevealProgress;
   assessment: RecallAssessment | null;
+};
+
+// A "paket" is the competition's own natural grouping of one
+// participant's 4 questions within one video/branch (see StqhnPackage in
+// prisma/schema.prisma) - allocated to a user at random, never repeating
+// a package the user has already completed while an untried one remains
+// (see getOrAllocateStqhnPackage in lib/memorization/stqhn/service.ts).
+// state is derived (every question assessed = COMPLETED), never stored.
+export type StqhnPackageDto = {
+  id: string;
+  competitionDay: number;
+  competitionBranch: StqhnCompetitionBranch;
+  participantDisplayNo: number;
+  state: "IN_PROGRESS" | "COMPLETED";
+  questions: StqhnPackageQuestion[];
+  activeQuestionId: string | null;
 };
 
 // History item - only ever produced for an assessed question, so the

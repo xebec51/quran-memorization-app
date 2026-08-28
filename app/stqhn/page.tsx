@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth/session";
 import {
-  getStqhnBank,
+  getCurrentStqhnPackage,
   getStqhnHistory,
   getStqhnSummary
 } from "@/lib/memorization/stqhn/service";
@@ -29,15 +29,15 @@ export default async function StqhnPage() {
     );
   }
 
-  const [bank, history, summary] = await Promise.all([
-    getStqhnBank(user.id, null, PAGE_SIZE),
+  const [initialPackage, history, summary] = await Promise.all([
+    getCurrentStqhnPackage(user.id),
     getStqhnHistory(user.id, null, PAGE_SIZE),
     getStqhnSummary(user.id)
   ]);
 
   return (
     <StqhnApp
-      initialBank={bank}
+      initialPackage={initialPackage}
       initialHistory={history}
       initialSummary={summary}
     />

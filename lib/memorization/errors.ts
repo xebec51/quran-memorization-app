@@ -34,3 +34,15 @@ export const evaluationAttemptConflictError = () =>
     "Permintaan ini sudah pernah dikirim dengan data yang berbeda.",
     409
   );
+// Every StqhnPackage a user could be given has already been fully
+// assessed by them - see getOrAllocateStqhnPackage's doc comment on why
+// a genuine repeat attempt isn't offered here: MemorizationQuestion rows
+// are permanent per (userId, stqhnQuestionId), so re-picking an
+// already-completed package can only ever resurface its old, unchanged
+// assessment, never a fresh gradable one.
+export const allStqhnPackagesCompletedError = () =>
+  new DomainError(
+    "ALL_STQHN_PACKAGES_COMPLETED",
+    "Anda telah menyelesaikan seluruh paket STQHN 2025. Lihat Riwayat STQHN untuk meninjau kembali.",
+    409
+  );
