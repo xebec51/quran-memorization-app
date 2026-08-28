@@ -286,6 +286,16 @@ model MemorizationQuestion {
   // MemorizationQuestion machinery used by cycle-plan questions, entirely
   // unmodified.
   stqhnQuestionId       String?
+  // Set to the createdAt of the most recent EvaluationAttempt for this
+  // question when that attempt's result is CORRECT (bel=0 && tuntun=0);
+  // reset to NULL by any subsequent non-CORRECT attempt. This is
+  // deliberately independent of QuestionAssessment (the immutable
+  // main-cycle result, which submitEvaluationAttempt never touches - see
+  // its docstring) - it only tracks whether the *latest* evaluation
+  // practice attempt cleared the question, so getEvaluationBank can stop
+  // surfacing a question the user has just recalled correctly without
+  // losing eligibility if a later practice attempt is missed again.
+  evaluationClearedAt   DateTime?
   createdAt             DateTime           @default(now())
   updatedAt             DateTime           @updatedAt
 

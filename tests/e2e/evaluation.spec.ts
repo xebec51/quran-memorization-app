@@ -405,7 +405,7 @@ test("evaluation reveal-all is idempotent - a repeat call returns the same alrea
   expect(secondBody.verses).toEqual(firstBody.verses);
 });
 
-test("evaluation attempts never overwrite the main-cycle assessment and are kept as separate history", async ({
+test("evaluation attempts never overwrite the main-cycle assessment, clear bank membership on a clean pass, and restore it on a later miss", async ({
   request
 }, testInfo) => {
   const { cookie, questionIds } = await setupAssessedQuestions(
@@ -414,11 +414,36 @@ test("evaluation attempts never overwrite the main-cycle assessment and are kept
   );
   const questionId = questionIds.missed[0];
 
+  async function bankHasQuestion() {
+    const bankResponse = await request.get("/api/evaluation/bank?limit=20", {
+      headers: { cookie }
+    });
+    const bank = (await bankResponse.json()).data as {
+      items: { questionId: string; lastResult: string }[];
+    };
+    return bank.items.find((item) => item.questionId === questionId);
+  }
+
+  // A MISSED practice attempt leaves the question in the bank, still
+  // reporting the main-cycle MISSED assessment (never the attempt's own
+  // result).
   const attempt1 = await submitAttempt(request, cookie, questionId, 2, 1);
+  expect(attempt1.result).toBe(deriveAssessment(2, 1));
+  expect((await bankHasQuestion())?.lastResult).toBe("MISSED");
+
+  // A clean 0/0 pass removes it from the bank...
   const attempt2 = await submitAttempt(request, cookie, questionId, 0, 0);
   expect(attempt1.id).not.toBe(attempt2.id);
-  expect(attempt1.result).toBe(deriveAssessment(2, 1));
   expect(attempt2.result).toBe(deriveAssessment(0, 0));
+  expect(await bankHasQuestion()).toBeUndefined();
+
+  // ...but the main-cycle QuestionAssessment itself was never overwritten
+  // to CORRECT: a further practice attempt is still accepted (it would be
+  // rejected as ineligible otherwise), and a miss brings the question
+  // straight back into the bank, still reporting MISSED.
+  const attempt3 = await submitAttempt(request, cookie, questionId, 1, 0);
+  expect(attempt3.result).toBe(deriveAssessment(1, 0));
+  expect((await bankHasQuestion())?.lastResult).toBe("MISSED");
 
   const historyResponse = await request.get(
     "/api/evaluation/history?limit=20",
@@ -435,24 +460,15 @@ test("evaluation attempts never overwrite the main-cycle assessment and are kept
   const attemptsForQuestion = history.items.filter(
     (item) => item.questionId === questionId
   );
-  expect(attemptsForQuestion).toHaveLength(2);
+  expect(attemptsForQuestion).toHaveLength(3);
   expect(attemptsForQuestion.map((item) => item.result).sort()).toEqual([
     "CORRECT",
+    "MISSED",
     "MISSED"
   ]);
-  expect(history.summary.totalAttempts).toBe(2);
-  expect(history.summary.totalBelCount).toBe(2);
+  expect(history.summary.totalAttempts).toBe(3);
+  expect(history.summary.totalBelCount).toBe(3);
   expect(history.summary.totalTuntunCount).toBe(1);
-
-  // The bank still lists it as MISSED - evaluation never touched QuestionAssessment.
-  const bankResponse = await request.get("/api/evaluation/bank?limit=20", {
-    headers: { cookie }
-  });
-  const bank = (await bankResponse.json()).data as {
-    items: { questionId: string; lastResult: string }[];
-  };
-  const entry = bank.items.find((item) => item.questionId === questionId);
-  expect(entry?.lastResult).toBe("MISSED");
 });
 
 test("belCount and tuntunCount must be non-negative integers", async ({
