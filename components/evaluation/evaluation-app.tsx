@@ -8,7 +8,8 @@ import {
   FastForward,
   History,
   ListChecks,
-  Repeat
+  Repeat,
+  Shuffle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -90,34 +91,20 @@ export function EvaluationApp({
   const [session, setSession] = useState<SessionDto | null>(null);
   const [justSaved, setJustSaved] = useState<JustSaved | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
+  const [randomPending, setRandomPending] = useState(false);
   const [revealPending, setRevealPending] = useState(false);
   const [revealAllPending, setRevealAllPending] = useState(false);
   const [submitPending, setSubmitPending] = useState(false);
   const [loadingMoreBank, setLoadingMoreBank] = useState(false);
   const [loadingMoreHistory, setLoadingMoreHistory] = useState(false);
-  // listError covers bank/history load failures and a failed session
-  // fetch (which never reaches the point of rendering the practice
-  // card), so it renders as a page-level banner. sessionError covers
-  // reveal/submit failures, which happen while the practice card is
-  // already open - those render inside that card instead of at the top
-  // of the page, so the error sits next to the action that caused it.
   const [listError, setListError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const submitLockRef = useRef(false);
   const revealLockRef = useRef(false);
   const revealAllLockRef = useRef(false);
+  const randomLockRef = useRef(false);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // One key per selected question, reused across retries of the same
-  // submission (double-click, dropped response) so the server can dedupe -
-  // see submitEvaluationAttempt. A fresh key is only drawn on selection.
   const attemptKeyRef = useRef<string>(crypto.randomUUID());
-  // The question a select/reveal/submit response is allowed to apply
-  // itself to. Updated synchronously (before any await) whenever the user
-  // switches questions, so a response that arrives after the user has
-  // since moved on - reveal/submit/select all run over the network and
-  // none of them are blocked by simply clicking a different bank item -
-  // is recognized as stale and discarded instead of overwriting the
-  // question the user is now actually looking at.
   const activeQuestionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -131,12 +118,6 @@ export function EvaluationApp({
       clearTimeout(savedTimeoutRef.current);
       savedTimeoutRef.current = null;
     }
-    // A fresh selection always wins: reset any in-flight reveal/submit
-    // lock and pending flag left over from whatever question was open
-    // before, so this question never inherits a stale busy state, and any
-    // response those older requests eventually resolve to is recognized
-    // as stale by the questionId check below instead of touching this
-    // question's UI.
     activeQuestionIdRef.current = item.questionId;
     revealLockRef.current = false;
     revealAllLockRef.current = false;
@@ -170,6 +151,42 @@ export function EvaluationApp({
     }
   }
 
+  async function selectRandomQuestion() {
+    if (randomLockRef.current || sessionLoading || bank.items.length === 0) return;
+    randomLockRef.current = true;
+    setRandomPending(true);
+    setListError(null);
+    try {
+      const exclude = activeQuestionIdRef.current
+        ? `?exclude=${encodeURIComponent(activeQuestionIdRef.current)}`
+        : "";
+      const item = await apiFetch<BankItem | null>(
+        `/api/evaluation/random${exclude}`,
+        undefined,
+        { method: "GET" }
+      );
+      if (!item) {
+        setListError("Belum ada soal yang dapat diacak di Bank Evaluasi.");
+        return;
+      }
+      // Keep a randomly selected question visible in the bank even when it
+      // came from a later cursor page, without disturbing pagination.
+      setBank((current) =>
+        current.items.some((existing) => existing.questionId === item.questionId)
+          ? current
+          : { ...current, items: [item, ...current.items] }
+      );
+      await selectQuestion(item);
+    } catch (err) {
+      setListError(
+        err instanceof Error ? err.message : "Gagal mengacak soal evaluasi."
+      );
+    } finally {
+      randomLockRef.current = false;
+      setRandomPending(false);
+    }
+  }
+
   async function revealNext() {
     if (!session || revealLockRef.current || session.isComplete) return;
     const questionId = session.questionId;
@@ -194,14 +211,6 @@ export function EvaluationApp({
     }
   }
 
-  /**
-   * "Soal selesai dijawab" - same rationale as the main flow's revealAll
-   * (components/memorization/memorization-app.tsx): reveals every
-   * remaining ayah of this session in one round trip via
-   * /api/evaluation/reveal-all instead of looping revealNext N times, for
-   * a user who already answered from memory. The answer still only ever
-   * arrives after this explicit request.
-   */
   async function revealAll() {
     if (!session || revealAllLockRef.current || session.isComplete) return;
     const questionId = session.questionId;
@@ -241,9 +250,6 @@ export function EvaluationApp({
         tuntunCount,
         clientRequestId: attemptKeyRef.current
       });
-      // A deduped retry (server returned the attempt already created by an
-      // earlier try with the same clientRequestId) must not be counted or
-      // listed twice on the client either.
       const alreadyRecorded = history.items.some(
         (item) => item.id === attempt.id
       );
@@ -261,14 +267,6 @@ export function EvaluationApp({
             [attempt.result]: current.resultCounts[attempt.result] + 1
           }
         }));
-        // Bank membership and lastResult are governed entirely by the
-        // question's main-cycle QuestionAssessment (see getEvaluationBank)
-        // - an evaluation attempt never touches that row, however it
-        // scores, so practicing the same question again later is always
-        // possible regardless of this attempt's result. Only
-        // lastAttemptAt (which genuinely reflects the latest evaluation
-        // attempt) is refreshed here immediately instead of waiting for
-        // the next full page load.
         setBank((current) => ({
           ...current,
           items: current.items.map((item) =>
@@ -278,11 +276,6 @@ export function EvaluationApp({
           )
         }));
       }
-      // Only show the "Tersimpan" confirmation (and schedule closing the
-      // card) if the user is still looking at the question that was just
-      // graded - if they've since switched to a different question, doing
-      // either would yank them back to, or silently close, a question
-      // they never submitted.
       if (activeQuestionIdRef.current === questionId) {
         setJustSaved({
           result: attempt.result,
@@ -290,6 +283,7 @@ export function EvaluationApp({
           tuntunCount: attempt.tuntunCount
         });
         savedTimeoutRef.current = setTimeout(() => {
+          activeQuestionIdRef.current = null;
           setSelectedId(null);
           setSession(null);
           setJustSaved(null);
@@ -320,7 +314,15 @@ export function EvaluationApp({
         { method: "GET" }
       );
       setBank((current) => ({
-        items: [...current.items, ...page.items],
+        items: [
+          ...current.items,
+          ...page.items.filter(
+            (item) =>
+              !current.items.some(
+                (existing) => existing.questionId === item.questionId
+              )
+          )
+        ],
         nextCursor: page.nextCursor
       }));
     } catch (err) {
@@ -363,46 +365,35 @@ export function EvaluationApp({
 
   return (
     <div className="grid gap-4 pb-20">
-      <div>
-        <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
-        <p className="mt-1 text-[var(--muted)]">
-          Latih ulang soal yang belum ingat atau sebagian benar, tanpa
-          mengganggu siklus 604 halaman.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
+          <p className="mt-1 text-[var(--muted)]">
+            Latih ulang soal yang belum ingat atau sebagian benar, tanpa
+            mengganggu siklus 604 halaman.
+          </p>
+        </div>
+        <Button
+          variant="secondary"
+          onClick={selectRandomQuestion}
+          disabled={randomPending || sessionLoading || bank.items.length === 0}
+        >
+          <Shuffle aria-hidden className="h-4 w-4" />
+          {randomPending ? "Mengacak..." : "Acak soal"}
+        </Button>
       </div>
 
       <Card>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 sm:divide-x sm:divide-[var(--border)]">
-          <Metric
-            icon={ListChecks}
-            label="Total percobaan"
-            value={summary.totalAttempts}
-          />
-          <Metric
-            icon={AlarmClock}
-            label="Total bel"
-            value={summary.totalBelCount}
-            className="sm:pl-4"
-          />
-          <Metric
-            icon={Repeat}
-            label="Total tuntun"
-            value={summary.totalTuntunCount}
-            className="sm:pl-4"
-          />
-          <Metric
-            icon={CheckCircle2}
-            label="Benar"
-            value={summary.resultCounts.CORRECT}
-            className="sm:pl-4"
-          />
+          <Metric icon={ListChecks} label="Total percobaan" value={summary.totalAttempts} />
+          <Metric icon={AlarmClock} label="Total bel" value={summary.totalBelCount} className="sm:pl-4" />
+          <Metric icon={Repeat} label="Total tuntun" value={summary.totalTuntunCount} className="sm:pl-4" />
+          <Metric icon={CheckCircle2} label="Benar" value={summary.resultCounts.CORRECT} className="sm:pl-4" />
         </div>
       </Card>
 
       {listError ? (
-        <Card role="alert" className="text-sm text-[var(--danger)]">
-          {listError}
-        </Card>
+        <Card role="alert" className="text-sm text-[var(--danger)]">{listError}</Card>
       ) : null}
 
       <Card>
@@ -410,8 +401,7 @@ export function EvaluationApp({
         {bank.items.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--muted)]">
             Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini
-            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum
-            ingat&quot; pada latihan utama.
+            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum ingat&quot; pada latihan utama.
           </p>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -419,57 +409,28 @@ export function EvaluationApp({
               <button
                 key={item.questionId}
                 type="button"
-                onClick={() => {
-                  if (!sessionLoading) selectQuestion(item);
-                }}
+                onClick={() => { if (!sessionLoading) selectQuestion(item); }}
                 aria-disabled={sessionLoading || undefined}
                 aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}: ${item.fragmentText}`}
-                className={`rounded-md border p-3 text-left text-sm transition ${
-                  sessionLoading ? "pointer-events-none opacity-70" : ""
-                } ${
-                  item.questionId === selectedId
-                    ? "border-[var(--primary)] bg-emerald-50"
-                    : "border-[var(--border)] bg-white hover:bg-slate-50"
-                }`}
+                className={`rounded-md border p-3 text-left text-sm transition ${sessionLoading ? "pointer-events-none opacity-70" : ""} ${item.questionId === selectedId ? "border-[var(--primary)] bg-emerald-50" : "border-[var(--border)] bg-white hover:bg-slate-50"}`}
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      item.lastResult === "MISSED"
-                        ? "bg-red-100 text-red-800"
-                        : "bg-amber-100 text-amber-800"
-                    }`}
-                  >
-                    {item.lastResult === "MISSED"
-                      ? "Belum ingat"
-                      : "Sebagian benar"}
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.lastResult === "MISSED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
+                    {item.lastResult === "MISSED" ? "Belum ingat" : "Sebagian benar"}
                   </span>
                   {item.lastAttemptAt ? (
                     <span className="text-[10px] text-[var(--muted)]">
-                      Dicoba{" "}
-                      {new Date(item.lastAttemptAt).toLocaleDateString("id-ID")}
+                      Dicoba {new Date(item.lastAttemptAt).toLocaleDateString("id-ID")}
                     </span>
                   ) : null}
                 </div>
-                <p
-                  className="quran-text text-right text-xl"
-                  translate="no"
-                  lang="ar"
-                  dir="rtl"
-                >
-                  {item.fragmentText}
-                </p>
+                <p className="quran-text text-right text-xl" translate="no" lang="ar" dir="rtl">{item.fragmentText}</p>
               </button>
             ))}
           </div>
         )}
         {bank.nextCursor ? (
-          <Button
-            variant="secondary"
-            className="mt-3"
-            disabled={loadingMoreBank}
-            onClick={loadMoreBank}
-          >
+          <Button variant="secondary" className="mt-3" disabled={loadingMoreBank} onClick={loadMoreBank}>
             {loadingMoreBank ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}
@@ -480,101 +441,52 @@ export function EvaluationApp({
           <div>
             <h2 className="font-semibold">Latihan ingatan</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ingat ayat berikut dari hafalan, buka satu per satu untuk
-              memeriksa, lalu catat hasilnya.
+              Ingat ayat berikut dari hafalan, buka satu per satu untuk memeriksa, lalu catat hasilnya.
             </p>
           </div>
-          {sessionError ? (
-            <p role="alert" className="text-sm text-[var(--danger)]">
-              {sessionError}
-            </p>
-          ) : null}
+          {sessionError ? <p role="alert" className="text-sm text-[var(--danger)]">{sessionError}</p> : null}
           {sessionLoading || !session ? (
             <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
           ) : justSaved ? (
             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              Tersimpan: {resultLabel(justSaved.result)} (bel{" "}
-              {justSaved.belCount}, tuntun {justSaved.tuntunCount})
+              Tersimpan: {resultLabel(justSaved.result)} (bel {justSaved.belCount}, tuntun {justSaved.tuntunCount})
             </div>
           ) : (
             <>
-              <p
-                className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
-                translate="no"
-                lang="ar"
-                dir="rtl"
-              >
-                {session.fragmentText}
-                <span aria-hidden className="text-[var(--accent)]">
-                  {" "}
-                  ...
-                </span>
+              <p className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl" translate="no" lang="ar" dir="rtl">
+                {session.fragmentText}<span aria-hidden className="text-[var(--accent)]"> ...</span>
               </p>
-
               {session.verses.length > 0 || revealPending ? (
                 <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
                   <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
-                    Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
-                    terbuka
-                    {session.isComplete ? " - halaman ini selesai" : ""}
+                    Ayat {session.revealedAyahCount}/{session.totalAyahCount} terbuka{session.isComplete ? " - halaman ini selesai" : ""}
                   </p>
                   <div className="grid gap-3 p-4 pt-0">
                     {session.verses.map((verse) => (
                       <div key={verse.verseKey} className="grid gap-1">
-                        <p className="text-xs text-[var(--muted)]">
-                          {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
-                          Halaman {verse.page}
-                        </p>
-                        <p
-                          className="quran-text text-right text-3xl"
-                          translate="no"
-                          lang="ar"
-                          dir="rtl"
-                        >
-                          {verse.text}
-                        </p>
+                        <p className="text-xs text-[var(--muted)]">{verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman {verse.page}</p>
+                        <p className="quran-text text-right text-3xl" translate="no" lang="ar" dir="rtl">{verse.text}</p>
                       </div>
                     ))}
                     {revealPending ? <RevealSkeletonRow /> : null}
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--muted)]">
-                  Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
-                  terbuka
-                </p>
+                <p className="text-sm text-[var(--muted)]">Ayat {session.revealedAyahCount}/{session.totalAyahCount} terbuka</p>
               )}
-
-              {/* Below the revealed-ayat list, not above it, so the button
-                  stays anchored right after the last-opened ayah as the
-                  list grows - matches the main flow's reveal button
-                  placement (components/memorization/memorization-app.tsx). */}
               {!session.isComplete ? (
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Button
-                    onClick={revealNext}
-                    disabled={revealPending || revealAllPending}
-                  >
+                  <Button onClick={revealNext} disabled={revealPending || revealAllPending}>
                     <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
                   </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={revealAll}
-                    disabled={revealPending || revealAllPending}
-                  >
-                    <FastForward aria-hidden className="h-4 w-4" />{" "}
-                    {revealAllPending
-                      ? "Membuka semua ayat..."
-                      : "Soal selesai dijawab"}
+                  <Button variant="secondary" onClick={revealAll} disabled={revealPending || revealAllPending}>
+                    <FastForward aria-hidden className="h-4 w-4" /> {revealAllPending ? "Membuka semua ayat..." : "Soal selesai dijawab"}
                   </Button>
                 </div>
               ) : (
                 <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
                   <p className="text-sm font-medium">Evaluasi jawaban</p>
-                  <AssessmentForm
-                    onAssess={submitAttempt}
-                    pending={submitPending}
-                  />
+                  <AssessmentForm onAssess={submitAttempt} pending={submitPending} />
                 </div>
               )}
             </>
@@ -588,46 +500,23 @@ export function EvaluationApp({
           <h2 className="font-semibold">Riwayat Evaluasi</h2>
         </div>
         {history.items.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            Belum ada percobaan evaluasi.
-          </p>
+          <p className="mt-2 text-sm text-[var(--muted)]">Belum ada percobaan evaluasi.</p>
         ) : (
           <div className="mt-3 grid gap-2">
             {history.items.map((attempt) => (
-              <div
-                key={attempt.id}
-                className="rounded-md bg-slate-50 p-3 text-sm"
-              >
+              <div key={attempt.id} className="rounded-md bg-slate-50 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">
-                    {resultLabel(attempt.result)}
-                  </span>
-                  <span className="text-xs text-[var(--muted)]">
-                    {new Date(attempt.createdAt).toLocaleString("id-ID")}
-                  </span>
+                  <span className="font-medium">{resultLabel(attempt.result)}</span>
+                  <span className="text-xs text-[var(--muted)]">{new Date(attempt.createdAt).toLocaleString("id-ID")}</span>
                 </div>
-                <p
-                  className="quran-text mt-1 text-right text-base"
-                  translate="no"
-                  lang="ar"
-                  dir="rtl"
-                >
-                  {attempt.fragmentText}
-                </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}
-                </p>
+                <p className="quran-text mt-1 text-right text-base" translate="no" lang="ar" dir="rtl">{attempt.fragmentText}</p>
+                <p className="mt-1 text-xs text-[var(--muted)]">Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}</p>
               </div>
             ))}
           </div>
         )}
         {history.nextCursor ? (
-          <Button
-            variant="secondary"
-            className="mt-3"
-            disabled={loadingMoreHistory}
-            onClick={loadMoreHistory}
-          >
+          <Button variant="secondary" className="mt-3" disabled={loadingMoreHistory} onClick={loadMoreHistory}>
             {loadingMoreHistory ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}
@@ -636,12 +525,7 @@ export function EvaluationApp({
   );
 }
 
-function Metric({
-  icon: Icon,
-  label,
-  value,
-  className = ""
-}: {
+function Metric({ icon: Icon, label, value, className = "" }: {
   icon: typeof ListChecks;
   label: string;
   value: number;
