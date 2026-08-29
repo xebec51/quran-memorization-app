@@ -73,9 +73,14 @@ const bankQuestionSelect = {
 
 /**
  * Evaluation-eligible = the question's current (latest, main-cycle)
- * assessment is MISSED or PARTIAL. Practicing it here never writes to
- * QuestionAssessment, so the bank membership only changes when the user
- * re-does the *main* question (not an evaluation attempt).
+ * assessment is MISSED or PARTIAL, AND its most recent evaluation
+ * practice attempt (if any) was not CORRECT (`evaluationClearedAt IS
+ * NULL` - see submitEvaluationAttempt). Practicing it here never writes
+ * to QuestionAssessment, so a question's *original* assessment stays
+ * MISSED/PARTIAL forever - only `evaluationClearedAt` tracks whether the
+ * user has since recalled it correctly, so a clean practice pass removes
+ * it from the bank without pretending the main-cycle result changed, and
+ * a later missed practice attempt brings it right back.
  *
  * Deliberately does not select/return primaryPageNumber (or any other
  * hidden-metadata field - see AGENT.md "Hidden Metadata Rule"): this is
@@ -97,7 +102,8 @@ export async function getEvaluationBank(
         prisma.memorizationQuestion.findMany({
           where: {
             userId,
-            assessment: { assessment: { in: ["MISSED", "PARTIAL"] } }
+            assessment: { assessment: { in: ["MISSED", "PARTIAL"] } },
+            evaluationClearedAt: null
           },
           // RecallAssessment's declaration order is CORRECT, PARTIAL,
           // MISSED, so DESC yields MISSED first, then PARTIAL - id is a
@@ -504,6 +510,16 @@ export async function submitEvaluationAttempt(
               select: evaluationAttemptDtoSelect
             });
             await tx.evaluationSession.delete({ where: { id: session.id } });
+            // A CORRECT practice pass clears bank membership until a
+            // later attempt misses again (see getEvaluationBank above).
+            await tx.memorizationQuestion.update({
+              where: { id: questionId },
+              data: {
+                evaluationClearedAt:
+                  result === "CORRECT" ? attempt.createdAt : null
+              },
+              select: { id: true }
+            });
             return dto(attempt);
           } catch (error) {
             if (

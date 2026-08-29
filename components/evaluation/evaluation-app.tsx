@@ -152,7 +152,8 @@ export function EvaluationApp({
   }
 
   async function selectRandomQuestion() {
-    if (randomLockRef.current || sessionLoading || bank.items.length === 0) return;
+    if (randomLockRef.current || sessionLoading || bank.items.length === 0)
+      return;
     randomLockRef.current = true;
     setRandomPending(true);
     setListError(null);
@@ -172,7 +173,9 @@ export function EvaluationApp({
       // Keep a randomly selected question visible in the bank even when it
       // came from a later cursor page, without disturbing pagination.
       setBank((current) =>
-        current.items.some((existing) => existing.questionId === item.questionId)
+        current.items.some(
+          (existing) => existing.questionId === item.questionId
+        )
           ? current
           : { ...current, items: [item, ...current.items] }
       );
@@ -385,15 +388,36 @@ export function EvaluationApp({
 
       <Card>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 sm:divide-x sm:divide-[var(--border)]">
-          <Metric icon={ListChecks} label="Total percobaan" value={summary.totalAttempts} />
-          <Metric icon={AlarmClock} label="Total bel" value={summary.totalBelCount} className="sm:pl-4" />
-          <Metric icon={Repeat} label="Total tuntun" value={summary.totalTuntunCount} className="sm:pl-4" />
-          <Metric icon={CheckCircle2} label="Benar" value={summary.resultCounts.CORRECT} className="sm:pl-4" />
+          <Metric
+            icon={ListChecks}
+            label="Total percobaan"
+            value={summary.totalAttempts}
+          />
+          <Metric
+            icon={AlarmClock}
+            label="Total bel"
+            value={summary.totalBelCount}
+            className="sm:pl-4"
+          />
+          <Metric
+            icon={Repeat}
+            label="Total tuntun"
+            value={summary.totalTuntunCount}
+            className="sm:pl-4"
+          />
+          <Metric
+            icon={CheckCircle2}
+            label="Benar"
+            value={summary.resultCounts.CORRECT}
+            className="sm:pl-4"
+          />
         </div>
       </Card>
 
       {listError ? (
-        <Card role="alert" className="text-sm text-[var(--danger)]">{listError}</Card>
+        <Card role="alert" className="text-sm text-[var(--danger)]">
+          {listError}
+        </Card>
       ) : null}
 
       <Card>
@@ -401,7 +425,8 @@ export function EvaluationApp({
         {bank.items.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--muted)]">
             Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini
-            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum ingat&quot; pada latihan utama.
+            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum
+            ingat&quot; pada latihan utama.
           </p>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -409,28 +434,47 @@ export function EvaluationApp({
               <button
                 key={item.questionId}
                 type="button"
-                onClick={() => { if (!sessionLoading) selectQuestion(item); }}
+                onClick={() => {
+                  if (!sessionLoading) selectQuestion(item);
+                }}
                 aria-disabled={sessionLoading || undefined}
                 aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}: ${item.fragmentText}`}
                 className={`rounded-md border p-3 text-left text-sm transition ${sessionLoading ? "pointer-events-none opacity-70" : ""} ${item.questionId === selectedId ? "border-[var(--primary)] bg-emerald-50" : "border-[var(--border)] bg-white hover:bg-slate-50"}`}
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.lastResult === "MISSED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>
-                    {item.lastResult === "MISSED" ? "Belum ingat" : "Sebagian benar"}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.lastResult === "MISSED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}
+                  >
+                    {item.lastResult === "MISSED"
+                      ? "Belum ingat"
+                      : "Sebagian benar"}
                   </span>
                   {item.lastAttemptAt ? (
                     <span className="text-[10px] text-[var(--muted)]">
-                      Dicoba {new Date(item.lastAttemptAt).toLocaleDateString("id-ID")}
+                      Dicoba{" "}
+                      {new Date(item.lastAttemptAt).toLocaleDateString("id-ID")}
                     </span>
                   ) : null}
                 </div>
-                <p className="quran-text text-right text-xl" translate="no" lang="ar" dir="rtl">{item.fragmentText}</p>
+                <p
+                  className="quran-text text-right text-xl"
+                  translate="no"
+                  lang="ar"
+                  dir="rtl"
+                >
+                  {item.fragmentText}
+                </p>
               </button>
             ))}
           </div>
         )}
         {bank.nextCursor ? (
-          <Button variant="secondary" className="mt-3" disabled={loadingMoreBank} onClick={loadMoreBank}>
+          <Button
+            variant="secondary"
+            className="mt-3"
+            disabled={loadingMoreBank}
+            onClick={loadMoreBank}
+          >
             {loadingMoreBank ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}
@@ -441,52 +485,94 @@ export function EvaluationApp({
           <div>
             <h2 className="font-semibold">Latihan ingatan</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Ingat ayat berikut dari hafalan, buka satu per satu untuk memeriksa, lalu catat hasilnya.
+              Ingat ayat berikut dari hafalan, buka satu per satu untuk
+              memeriksa, lalu catat hasilnya.
             </p>
           </div>
-          {sessionError ? <p role="alert" className="text-sm text-[var(--danger)]">{sessionError}</p> : null}
+          {sessionError ? (
+            <p role="alert" className="text-sm text-[var(--danger)]">
+              {sessionError}
+            </p>
+          ) : null}
           {sessionLoading || !session ? (
             <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
           ) : justSaved ? (
             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              Tersimpan: {resultLabel(justSaved.result)} (bel {justSaved.belCount}, tuntun {justSaved.tuntunCount})
+              Tersimpan: {resultLabel(justSaved.result)} (bel{" "}
+              {justSaved.belCount}, tuntun {justSaved.tuntunCount})
             </div>
           ) : (
             <>
-              <p className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl" translate="no" lang="ar" dir="rtl">
-                {session.fragmentText}<span aria-hidden className="text-[var(--accent)]"> ...</span>
+              <p
+                className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
+                translate="no"
+                lang="ar"
+                dir="rtl"
+              >
+                {session.fragmentText}
+                <span aria-hidden className="text-[var(--accent)]">
+                  {" "}
+                  ...
+                </span>
               </p>
               {session.verses.length > 0 || revealPending ? (
                 <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
                   <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
-                    Ayat {session.revealedAyahCount}/{session.totalAyahCount} terbuka{session.isComplete ? " - halaman ini selesai" : ""}
+                    Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                    terbuka{session.isComplete ? " - halaman ini selesai" : ""}
                   </p>
                   <div className="grid gap-3 p-4 pt-0">
                     {session.verses.map((verse) => (
                       <div key={verse.verseKey} className="grid gap-1">
-                        <p className="text-xs text-[var(--muted)]">{verse.surah} - {verse.verseKey} - Juz {verse.juz} - Halaman {verse.page}</p>
-                        <p className="quran-text text-right text-3xl" translate="no" lang="ar" dir="rtl">{verse.text}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
+                          Halaman {verse.page}
+                        </p>
+                        <p
+                          className="quran-text text-right text-3xl"
+                          translate="no"
+                          lang="ar"
+                          dir="rtl"
+                        >
+                          {verse.text}
+                        </p>
                       </div>
                     ))}
                     {revealPending ? <RevealSkeletonRow /> : null}
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-[var(--muted)]">Ayat {session.revealedAyahCount}/{session.totalAyahCount} terbuka</p>
+                <p className="text-sm text-[var(--muted)]">
+                  Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                  terbuka
+                </p>
               )}
               {!session.isComplete ? (
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Button onClick={revealNext} disabled={revealPending || revealAllPending}>
+                  <Button
+                    onClick={revealNext}
+                    disabled={revealPending || revealAllPending}
+                  >
                     <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
                   </Button>
-                  <Button variant="secondary" onClick={revealAll} disabled={revealPending || revealAllPending}>
-                    <FastForward aria-hidden className="h-4 w-4" /> {revealAllPending ? "Membuka semua ayat..." : "Soal selesai dijawab"}
+                  <Button
+                    variant="secondary"
+                    onClick={revealAll}
+                    disabled={revealPending || revealAllPending}
+                  >
+                    <FastForward aria-hidden className="h-4 w-4" />{" "}
+                    {revealAllPending
+                      ? "Membuka semua ayat..."
+                      : "Soal selesai dijawab"}
                   </Button>
                 </div>
               ) : (
                 <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
                   <p className="text-sm font-medium">Evaluasi jawaban</p>
-                  <AssessmentForm onAssess={submitAttempt} pending={submitPending} />
+                  <AssessmentForm
+                    onAssess={submitAttempt}
+                    pending={submitPending}
+                  />
                 </div>
               )}
             </>
@@ -500,23 +586,46 @@ export function EvaluationApp({
           <h2 className="font-semibold">Riwayat Evaluasi</h2>
         </div>
         {history.items.length === 0 ? (
-          <p className="mt-2 text-sm text-[var(--muted)]">Belum ada percobaan evaluasi.</p>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Belum ada percobaan evaluasi.
+          </p>
         ) : (
           <div className="mt-3 grid gap-2">
             {history.items.map((attempt) => (
-              <div key={attempt.id} className="rounded-md bg-slate-50 p-3 text-sm">
+              <div
+                key={attempt.id}
+                className="rounded-md bg-slate-50 p-3 text-sm"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{resultLabel(attempt.result)}</span>
-                  <span className="text-xs text-[var(--muted)]">{new Date(attempt.createdAt).toLocaleString("id-ID")}</span>
+                  <span className="font-medium">
+                    {resultLabel(attempt.result)}
+                  </span>
+                  <span className="text-xs text-[var(--muted)]">
+                    {new Date(attempt.createdAt).toLocaleString("id-ID")}
+                  </span>
                 </div>
-                <p className="quran-text mt-1 text-right text-base" translate="no" lang="ar" dir="rtl">{attempt.fragmentText}</p>
-                <p className="mt-1 text-xs text-[var(--muted)]">Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}</p>
+                <p
+                  className="quran-text mt-1 text-right text-base"
+                  translate="no"
+                  lang="ar"
+                  dir="rtl"
+                >
+                  {attempt.fragmentText}
+                </p>
+                <p className="mt-1 text-xs text-[var(--muted)]">
+                  Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}
+                </p>
               </div>
             ))}
           </div>
         )}
         {history.nextCursor ? (
-          <Button variant="secondary" className="mt-3" disabled={loadingMoreHistory} onClick={loadMoreHistory}>
+          <Button
+            variant="secondary"
+            className="mt-3"
+            disabled={loadingMoreHistory}
+            onClick={loadMoreHistory}
+          >
             {loadingMoreHistory ? "Memuat..." : "Muat lebih banyak"}
           </Button>
         ) : null}
@@ -525,7 +634,12 @@ export function EvaluationApp({
   );
 }
 
-function Metric({ icon: Icon, label, value, className = "" }: {
+function Metric({
+  icon: Icon,
+  label,
+  value,
+  className = ""
+}: {
   icon: typeof ListChecks;
   label: string;
   value: number;

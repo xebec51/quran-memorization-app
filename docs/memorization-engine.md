@@ -163,7 +163,14 @@ its own state:
   (`fragmentStartWordId` + `initialWordCount`, fixed at question
   generation) - never the fragment as extended by an `EXTEND_FRAGMENT`
   hint during the main cycle, which would leak progress made outside this
-  practice session.
+  practice session. Eligibility additionally requires
+  `MemorizationQuestion.evaluationClearedAt IS NULL`: a clean 0/0 practice
+  pass sets it to that attempt's `createdAt`, removing the question from
+  the bank without touching the main-cycle `QuestionAssessment`; any later
+  non-`CORRECT` practice attempt resets it to `NULL`, bringing the
+  question straight back. So "already evaluated and answered without a
+  mistake" reflects the _latest_ practice attempt, not a one-time
+  exemption.
 - Reveal progress lives in its own `EvaluationSession` row
   (`(userId, questionId)` unique), completely separate from
   `MemorizationQuestion`'s own reveal columns - main-cycle reveal state is
@@ -187,7 +194,10 @@ its own state:
   own bel/tuntun counts. Every attempt becomes a new `EvaluationAttempt`
   history row; it never changes the main-cycle `QuestionAssessment`. On
   success the `EvaluationSession` row is deleted so the next practice of
-  the same question starts fully hidden again.
+  the same question starts fully hidden again, and
+  `MemorizationQuestion.evaluationClearedAt` is stamped with the attempt's
+  `createdAt` when `result` is `CORRECT` or reset to `NULL` otherwise (see
+  the bank eligibility rule above).
 - Idempotency is scoped per user
   (`@@unique([userId, clientRequestId])`, a client-generated key resent
   unchanged on retry): replaying the same key with the same payload

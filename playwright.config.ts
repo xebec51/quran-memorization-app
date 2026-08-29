@@ -12,7 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: "html",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:3210",
+    baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:3210",
     trace: "on-first-retry"
   },
   webServer: process.env.E2E_BASE_URL
