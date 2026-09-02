@@ -8,7 +8,9 @@ import {
   History,
   ListChecks,
   Trophy,
-  Video
+  Video,
+  RotateCcw,
+  FileText
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -37,6 +39,11 @@ type PackageQuestion = {
   id: string;
   order: number;
   fragmentText: string;
+  audio: {
+    videoId: string;
+    startSeconds: number;
+    endSeconds: number;
+  };
   reveal: RevealProgress;
   assessment: Assessment | null;
 };
@@ -601,6 +608,8 @@ function QuestionPanel({
   onRevealAll: () => void;
   onAssess: (belCount: number, tuntunCount: number) => void;
 }) {
+  const [audioReplayKey, setAudioReplayKey] = useState(0);
+  const [showTextFallback, setShowTextFallback] = useState(false);
   const questionComplete = question.assessment !== null;
   const reveal = question.reveal;
   const assessmentOpen = reveal.isComplete;
@@ -613,17 +622,56 @@ function QuestionPanel({
 
   return (
     <div className="grid gap-5 tasmiq-panel-enter">
-      <div
-        className="quran-text min-h-44 rounded-md bg-[#fbfaf4] p-5 text-right text-4xl leading-loose md:text-5xl"
-        translate="no"
-        lang="ar"
-        dir="rtl"
-      >
-        {question.fragmentText}
-        <span aria-hidden className="text-[var(--accent)]">
-          {" "}
-          ...
-        </span>
+      <div className="grid gap-3 rounded-md border border-[var(--border)] bg-slate-950 p-3 text-white">
+        <div className="aspect-video min-h-[200px] w-full overflow-hidden rounded bg-black">
+          <iframe
+            key={`${question.id}-${audioReplayKey}`}
+            className="h-full w-full"
+            src={youtubeEmbedUrl(question.audio)}
+            title={`Rekaman soal STQHN nomor ${question.order}`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allowFullScreen
+          />
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-200">
+            Putar rekaman soal, lalu lanjutkan bacaannya dari hafalan.
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setAudioReplayKey((current) => current + 1)}
+            disabled={questionComplete}
+          >
+            <RotateCcw aria-hidden className="h-4 w-4" /> Putar ulang
+          </Button>
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setShowTextFallback((current) => !current)}
+          aria-expanded={showTextFallback}
+        >
+          <FileText aria-hidden className="h-4 w-4" />
+          {showTextFallback ? "Sembunyikan teks soal" : "Tampilkan teks soal"}
+        </Button>
+        {showTextFallback ? (
+          <div
+            className="quran-text min-h-44 rounded-md bg-[#fbfaf4] p-5 text-right text-4xl leading-loose md:text-5xl"
+            translate="no"
+            lang="ar"
+            dir="rtl"
+          >
+            {question.fragmentText}
+            <span aria-hidden className="text-[var(--accent)]">
+              {" "}
+              ...
+            </span>
+          </div>
+        ) : null}
       </div>
       {questionComplete ? (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
@@ -685,9 +733,23 @@ function QuestionPanel({
       {assessmentOpen ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm font-medium">Evaluasi jawaban</p>
+          <p className="text-sm text-[var(--muted)]">
+            Hanya 0 bel dan 0 tuntun yang dianggap mulus. Jika ada kesalahan
+            atau tuntun, soal otomatis masuk ke Latihan Evaluasi.
+          </p>
           <AssessmentForm onAssess={onAssess} pending={pendingAssessment} />
         </div>
       ) : null}
     </div>
   );
+}
+
+function youtubeEmbedUrl(audio: PackageQuestion["audio"]): string {
+  const params = new URLSearchParams({
+    start: String(Math.max(0, Math.floor(audio.startSeconds))),
+    end: String(Math.max(1, Math.ceil(audio.endSeconds))),
+    playsinline: "1",
+    rel: "0"
+  });
+  return `https://www.youtube-nocookie.com/embed/${encodeURIComponent(audio.videoId)}?${params.toString()}`;
 }

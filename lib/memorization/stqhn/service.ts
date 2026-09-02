@@ -50,7 +50,14 @@ const packageQuestionSelect = {
   revealTotalAyahCount: true,
   revealedVersesJson: true,
   assessment: { select: { assessment: true } },
-  stqhnQuestion: { select: { questionNoForParticipant: true } }
+  stqhnQuestion: {
+    select: {
+      questionNoForParticipant: true,
+      videoId: true,
+      timestampStartSec: true,
+      timestampEndSec: true
+    }
+  }
 } satisfies Prisma.MemorizationQuestionSelect;
 
 type PackageQuestionRow = Prisma.MemorizationQuestionGetPayload<{
@@ -71,10 +78,25 @@ type PackageRow = Prisma.StqhnPackageGetPayload<{
 function packageQuestionDto(
   question: PackageQuestionRow
 ): StqhnPackageQuestion {
+  const stqhnQuestion = question.stqhnQuestion!;
+  // The source end timestamp is the end of the participant's complete
+  // answer, not the end of the judge's prompt. Never expose that whole
+  // interval before assessment: it would reveal the expected continuation.
+  // Until prompt-specific end timestamps are curated, use a deliberately
+  // short clip and let the learner replay it when necessary.
+  const conservativeEnd = stqhnQuestion.timestampStartSec + 10;
   return {
     id: question.id,
     order: question.stqhnQuestion!.questionNoForParticipant,
     fragmentText: question.visibleFragmentText,
+    audio: {
+      videoId: stqhnQuestion.videoId,
+      startSeconds: stqhnQuestion.timestampStartSec,
+      endSeconds: Math.min(
+        stqhnQuestion.timestampEndSec ?? conservativeEnd,
+        conservativeEnd
+      )
+    },
     reveal: {
       revealedAyahCount: question.revealedAyahCount,
       totalAyahCount: question.revealTotalAyahCount,

@@ -128,6 +128,11 @@ run(
       const first = await getOrAllocateStqhnPackage(userId);
       expect(first.state).toBe("IN_PROGRESS");
       expect(first.questions.length).toBeGreaterThan(0);
+      expect(first.questions[0]?.audio).toEqual({
+        videoId: "synthetic-flow",
+        startSeconds: 0,
+        endSeconds: 10
+      });
       const resumed = await getOrAllocateStqhnPackage(userId);
       expect(resumed.id).toBe(first.id);
       expect(resumed.questions.map((q) => q.id).sort()).toEqual(

@@ -182,6 +182,11 @@ export type StqhnPackageQuestion = {
   id: string;
   order: number;
   fragmentText: string;
+  audio: {
+    videoId: string;
+    startSeconds: number;
+    endSeconds: number;
+  };
   reveal: RevealProgress;
   assessment: RecallAssessment | null;
 };
