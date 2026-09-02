@@ -20,3 +20,20 @@ export function deriveAssessment(
 ): RecallAssessment {
   return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
 }
+
+/** Compact result copy shared by every history view. */
+export function formatAssessmentPerformance(
+  belCount: number | null,
+  tuntunCount: number | null
+): string | null {
+  // Old assessments created before the counters existed cannot be described
+  // truthfully, so callers should omit the performance label for those rows.
+  if (belCount === null && tuntunCount === null) return null;
+
+  const bel = belCount ?? 0;
+  const tuntun = tuntunCount ?? 0;
+  if (bel > 0 && tuntun > 0) return `${bel} BEL • ${tuntun} TUNTUN`;
+  if (bel > 0) return `${bel} BEL`;
+  if (tuntun > 0) return `${tuntun} TUNTUN`;
+  return "Mulus";
+}

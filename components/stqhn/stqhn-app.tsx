@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/client/api";
+import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
 import { AssessmentForm } from "@/components/memorization/assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
@@ -567,8 +568,11 @@ export function StqhnApp({
                       </p>
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-[var(--muted)]">
-                          Bel: {item.belCount} - Tuntun: {item.tuntunCount} -{" "}
-                          {new Date(item.assessedAt).toLocaleString("id-ID")}
+                          {formatAssessmentPerformance(
+                            item.belCount,
+                            item.tuntunCount
+                          )}{" "}
+                          - {new Date(item.assessedAt).toLocaleString("id-ID")}
                         </p>
                         <a
                           href={item.sourceVideoUrl}

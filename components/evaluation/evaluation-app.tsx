@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/client/api";
+import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
 import {
   AssessmentForm,
   RevealSkeletonRow
@@ -613,7 +614,10 @@ export function EvaluationApp({
                   {attempt.fragmentText}
                 </p>
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Bel: {attempt.belCount} - Tuntun: {attempt.tuntunCount}
+                  {formatAssessmentPerformance(
+                    attempt.belCount,
+                    attempt.tuntunCount
+                  )}
                 </p>
               </div>
             ))}

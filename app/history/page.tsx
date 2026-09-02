@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getPackageHistory } from "@/lib/memorization/history/service";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
 
 export const dynamic = "force-dynamic";
 
@@ -56,11 +57,18 @@ export default async function HistoryPage({
                     ? assessmentLabel(question.assessment)
                     : "Belum dinilai"}{" "}
                   - {question.hints} petunjuk
-                  {question.belCount !== null &&
-                  question.tuntunCount !== null ? (
+                  {formatAssessmentPerformance(
+                    question.belCount,
+                    question.tuntunCount
+                  ) ? (
                     <>
                       {" "}
-                      (bel {question.belCount}, tuntun {question.tuntunCount})
+                      (
+                      {formatAssessmentPerformance(
+                        question.belCount,
+                        question.tuntunCount
+                      )}
+                      )
                     </>
                   ) : null}
                 </summary>
