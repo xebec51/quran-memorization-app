@@ -131,7 +131,7 @@ run(
       expect(first.questions[0]?.audio).toEqual({
         videoId: "synthetic-flow",
         startSeconds: 0,
-        endSeconds: 10
+        endSeconds: 15
       });
       const resumed = await getOrAllocateStqhnPackage(userId);
       expect(resumed.id).toBe(first.id);
@@ -164,10 +164,14 @@ run(
       // timestamp (MemorizationQuestion.createdAt, set at allocation
       // time for every question in the package at once). ---
       const stqhnHistoryAfterWrong = await getStqhnHistory(userId, null, 50);
-      const stqhnHistoryItem = stqhnHistoryAfterWrong.items.find(
+      const historyPackage = stqhnHistoryAfterWrong.items.find((pkg) =>
+        pkg.questions.some((item) => item.questionId === wrongQuestionId)
+      );
+      const stqhnHistoryItem = historyPackage?.questions.find(
         (item) => item.questionId === wrongQuestionId
       );
       expect(stqhnHistoryItem).toBeDefined();
+      expect(historyPackage?.questions.length).toBeGreaterThan(0);
       const rawAssessment = await prisma.questionAssessment.findUniqueOrThrow({
         where: { questionId: wrongQuestionId },
         select: { createdAt: true }

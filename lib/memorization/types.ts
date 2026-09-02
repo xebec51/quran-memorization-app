@@ -216,6 +216,7 @@ export type StqhnHistoryItem = {
   questionId: string;
   stqhnQuestionId: string;
   questionCode: string;
+  questionOrder: number;
   competitionBranch: StqhnCompetitionBranch;
   competitionDay: number;
   passageRange: string;
@@ -228,8 +229,17 @@ export type StqhnHistoryItem = {
   assessedAt: string;
 };
 
+export type StqhnHistoryPackage = {
+  packageId: string;
+  competitionBranch: StqhnCompetitionBranch;
+  competitionDay: number;
+  participantDisplayNo: number;
+  latestAssessedAt: string;
+  questions: StqhnHistoryItem[];
+};
+
 export type StqhnHistoryPage = {
-  items: StqhnHistoryItem[];
+  items: StqhnHistoryPackage[];
   nextCursor: string | null;
 };
 

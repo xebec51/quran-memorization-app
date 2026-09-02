@@ -62,6 +62,7 @@ type HistoryItem = {
   questionId: string;
   stqhnQuestionId: string;
   questionCode: string;
+  questionOrder: number;
   competitionBranch: CompetitionBranch;
   competitionDay: number;
   passageRange: string;
@@ -74,7 +75,16 @@ type HistoryItem = {
   assessedAt: string;
 };
 
-type HistoryPage = { items: HistoryItem[]; nextCursor: string | null };
+type HistoryPackage = {
+  packageId: string;
+  competitionBranch: CompetitionBranch;
+  competitionDay: number;
+  participantDisplayNo: number;
+  latestAssessedAt: string;
+  questions: HistoryItem[];
+};
+
+type HistoryPage = { items: HistoryPackage[]; nextCursor: string | null };
 
 type Summary = {
   totalQuestions: number;
@@ -349,7 +359,7 @@ export function StqhnApp({
     setLoadingMoreHistory(true);
     try {
       const page = await apiFetch<HistoryPage>(
-        `/api/stqhn/history?cursor=${encodeURIComponent(history.nextCursor)}&limit=20`,
+        `/api/stqhn/history?cursor=${encodeURIComponent(history.nextCursor)}&limit=10`,
         undefined,
         { method: "GET" }
       );
@@ -506,49 +516,72 @@ export function StqhnApp({
             Belum ada soal STQHN yang dinilai.
           </p>
         ) : (
-          <div className="mt-3 grid gap-2">
-            {history.items.map((item) => (
+          <div className="mt-3 grid gap-4">
+            {history.items.map((historyPackage) => (
               <div
-                key={item.questionId}
-                className="rounded-md bg-slate-50 p-3 text-sm"
+                key={historyPackage.packageId}
+                className="overflow-hidden rounded-md border border-[var(--border)]"
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-[var(--muted)]">
-                    {item.questionCode} - Hari {item.competitionDay} -{" "}
-                    {branchLabel(item.competitionBranch)} - {item.passageRange}
-                  </span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                      item.assessment === "CORRECT"
-                        ? "bg-emerald-100 text-emerald-900"
-                        : "bg-amber-100 text-amber-900"
-                    }`}
-                  >
-                    {assessmentLabel(item.assessment)}
-                  </span>
-                </div>
-                <p
-                  className="quran-text mt-2 text-right text-base"
-                  translate="no"
-                  lang="ar"
-                  dir="rtl"
-                >
-                  {item.fragmentText}
-                </p>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-100 px-4 py-3">
+                  <div>
+                    <p className="font-semibold">
+                      Paket Peserta {historyPackage.participantDisplayNo}
+                    </p>
+                    <p className="text-xs text-[var(--muted)]">
+                      Hari {historyPackage.competitionDay} -{" "}
+                      {branchLabel(historyPackage.competitionBranch)} -{" "}
+                      {historyPackage.questions.length}/4 soal dinilai
+                    </p>
+                  </div>
                   <p className="text-xs text-[var(--muted)]">
-                    Bel: {item.belCount} - Tuntun: {item.tuntunCount} -{" "}
-                    {new Date(item.assessedAt).toLocaleString("id-ID")}
+                    {new Date(historyPackage.latestAssessedAt).toLocaleString(
+                      "id-ID"
+                    )}
                   </p>
-                  <a
-                    href={item.sourceVideoUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--primary)] hover:underline"
-                  >
-                    <Video aria-hidden className="h-3.5 w-3.5" />
-                    Lihat Video Sumber
-                  </a>
+                </div>
+                <div className="grid divide-y divide-[var(--border)]">
+                  {historyPackage.questions.map((item) => (
+                    <div key={item.questionId} className="bg-white p-4 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-medium text-[var(--muted)]">
+                          Soal {item.questionOrder} - {item.questionCode} -{" "}
+                          {item.passageRange}
+                        </span>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            item.assessment === "CORRECT"
+                              ? "bg-emerald-100 text-emerald-900"
+                              : "bg-amber-100 text-amber-900"
+                          }`}
+                        >
+                          {assessmentLabel(item.assessment)}
+                        </span>
+                      </div>
+                      <p
+                        className="quran-text mt-2 text-right text-base"
+                        translate="no"
+                        lang="ar"
+                        dir="rtl"
+                      >
+                        {item.fragmentText}
+                      </p>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs text-[var(--muted)]">
+                          Bel: {item.belCount} - Tuntun: {item.tuntunCount} -{" "}
+                          {new Date(item.assessedAt).toLocaleString("id-ID")}
+                        </p>
+                        <a
+                          href={item.sourceVideoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--primary)] hover:underline"
+                        >
+                          <Video aria-hidden className="h-3.5 w-3.5" />
+                          Lihat Video Sumber
+                        </a>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             ))}

@@ -2,7 +2,6 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
 import { bandForJuz } from "../cycle/constants";
 import { CryptoRandomSource } from "../random";
@@ -13,6 +12,7 @@ import type {
   RecallAssessment,
   RevealedAyah,
   StqhnHistoryItem,
+  StqhnHistoryPackage,
   StqhnHistoryPage,
   StqhnPackageDto,
   StqhnPackageQuestion,
@@ -84,7 +84,7 @@ function packageQuestionDto(
   // interval before assessment: it would reveal the expected continuation.
   // Until prompt-specific end timestamps are curated, use a deliberately
   // short clip and let the learner replay it when necessary.
-  const conservativeEnd = stqhnQuestion.timestampStartSec + 10;
+  const conservativeEnd = stqhnQuestion.timestampStartSec + 15;
   return {
     id: question.id,
     order: question.stqhnQuestion!.questionNoForParticipant,
@@ -367,8 +367,15 @@ const historySelect = {
     select: {
       id: true,
       questionId: true,
+      questionNoForParticipant: true,
       competitionBranch: true,
       competitionDay: true,
+      stqhnPackage: {
+        select: {
+          id: true,
+          participantDisplayNo: true
+        }
+      },
       passageRange: true,
       sourceYoutubeUrl: true,
       timestampStartSec: true
@@ -385,8 +392,11 @@ const historySelect = {
 } satisfies Prisma.MemorizationQuestionSelect;
 
 /**
- * Only ever returns assessed questions (assessment is required below),
- * each including the source video link with a timestamp - safe here
+ * Returns assessed questions grouped and paginated by their original
+ * competition package. Grouping on the server is important: client-side
+ * grouping of a question-paginated list could split one four-question
+ * package across two pages. Each question includes the source video link
+ * with a timestamp - safe here
  * specifically because history only ever shows a question the user has
  * already answered (see AGENT.md "Hidden Metadata Rule": the video is
  * the recorded original answer, so it must never reach the client before
@@ -400,46 +410,76 @@ export async function getStqhnHistory(
   limit: number
 ): Promise<StqhnHistoryPage> {
   return measureServerTiming("stqhn_history", async () => {
-    const page = await paginateByCursor(
-      (args) =>
-        prisma.memorizationQuestion.findMany({
-          where: {
-            userId,
-            stqhnQuestionId: { not: null },
-            assessment: { isNot: null }
-          },
-          orderBy: [{ assessment: { createdAt: "desc" } }, { id: "desc" }],
-          select: historySelect,
-          ...args
-        }),
-      cursor,
-      limit,
-      (question) => {
-        const stqhn = question.stqhnQuestion!;
-        const assessment = question.assessment!;
-        return {
-          questionId: question.id,
-          stqhnQuestionId: stqhn.id,
-          questionCode: stqhn.questionId,
+    // The bank contains only 93 packages / 372 questions. Reading the user's
+    // assessed rows once lets us paginate on the package boundary without a
+    // denormalized per-user package table or an unstable cross-relation cursor.
+    const rows = await prisma.memorizationQuestion.findMany({
+      where: {
+        userId,
+        stqhnQuestionId: { not: null },
+        assessment: { isNot: null }
+      },
+      orderBy: [{ assessment: { createdAt: "desc" } }, { id: "desc" }],
+      select: historySelect
+    });
+
+    const grouped = new Map<string, StqhnHistoryPackage>();
+    for (const question of rows) {
+      const stqhn = question.stqhnQuestion!;
+      const assessment = question.assessment!;
+      const packageId = stqhn.stqhnPackage.id;
+      const item = {
+        questionId: question.id,
+        stqhnQuestionId: stqhn.id,
+        questionCode: stqhn.questionId,
+        questionOrder: stqhn.questionNoForParticipant,
+        competitionBranch: stqhn.competitionBranch,
+        competitionDay: stqhn.competitionDay,
+        passageRange: stqhn.passageRange,
+        assessment: assessment.assessment,
+        belCount: assessment.belCount ?? 0,
+        tuntunCount: assessment.tuntunCount ?? 0,
+        fragmentText: question.visibleFragmentText,
+        revealedVerses:
+          question.revealedVersesJson as unknown as RevealedAyah[],
+        sourceVideoUrl: withTimestamp(
+          stqhn.sourceYoutubeUrl,
+          stqhn.timestampStartSec
+        ),
+        assessedAt: assessment.createdAt.toISOString()
+      } satisfies StqhnHistoryItem;
+
+      const existing = grouped.get(packageId);
+      if (existing) {
+        existing.questions.push(item);
+      } else {
+        grouped.set(packageId, {
+          packageId,
           competitionBranch: stqhn.competitionBranch,
           competitionDay: stqhn.competitionDay,
-          passageRange: stqhn.passageRange,
-          assessment: assessment.assessment,
-          belCount: assessment.belCount ?? 0,
-          tuntunCount: assessment.tuntunCount ?? 0,
-          fragmentText: question.visibleFragmentText,
-          revealedVerses:
-            question.revealedVersesJson as unknown as RevealedAyah[],
-          sourceVideoUrl: withTimestamp(
-            stqhn.sourceYoutubeUrl,
-            stqhn.timestampStartSec
-          ),
-          assessedAt: assessment.createdAt.toISOString()
-        } satisfies StqhnHistoryItem;
-      },
-      (question) => question.id
-    );
-    return page;
+          participantDisplayNo: stqhn.stqhnPackage.participantDisplayNo,
+          latestAssessedAt: item.assessedAt,
+          questions: [item]
+        });
+      }
+    }
+
+    const packages = [...grouped.values()].map((pkg) => ({
+      ...pkg,
+      questions: pkg.questions.sort(
+        (left, right) => left.questionOrder - right.questionOrder
+      )
+    }));
+    const cursorIndex = cursor
+      ? packages.findIndex((pkg) => pkg.packageId === cursor)
+      : -1;
+    const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+    const page = packages.slice(start, start + limit);
+    const hasMore = start + limit < packages.length;
+    return {
+      items: page,
+      nextCursor: hasMore ? (page.at(-1)?.packageId ?? null) : null
+    };
   });
 }
 

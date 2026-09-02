@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 
 export const dynamic = "force-dynamic";
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 export default async function StqhnPage() {
   const user = await getCurrentUser();
