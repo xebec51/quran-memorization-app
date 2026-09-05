@@ -84,7 +84,7 @@ function packageQuestionDto(
   // interval before assessment: it would reveal the expected continuation.
   // Until prompt-specific end timestamps are curated, use a deliberately
   // short clip and let the learner replay it when necessary.
-  const conservativeEnd = stqhnQuestion.timestampStartSec + 15;
+  const conservativeEnd = stqhnQuestion.timestampStartSec + 20;
   return {
     id: question.id,
     order: question.stqhnQuestion!.questionNoForParticipant,

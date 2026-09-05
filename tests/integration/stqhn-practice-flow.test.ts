@@ -131,7 +131,7 @@ run(
       expect(first.questions[0]?.audio).toEqual({
         videoId: "synthetic-flow",
         startSeconds: 0,
-        endSeconds: 15
+        endSeconds: 20
       });
       const resumed = await getOrAllocateStqhnPackage(userId);
       expect(resumed.id).toBe(first.id);
