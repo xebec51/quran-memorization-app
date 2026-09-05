@@ -148,8 +148,16 @@ async function fetchPackageDto(
     where: { id: stqhnPackageId },
     select: packageSelect
   });
+  return fetchPackageQuestionsDto(tx, userId, pkg);
+}
+
+async function fetchPackageQuestionsDto(
+  tx: Prisma.TransactionClient | typeof prisma,
+  userId: string,
+  pkg: PackageRow
+): Promise<StqhnPackageDto> {
   const questionRows = await tx.memorizationQuestion.findMany({
-    where: { userId, stqhnQuestion: { stqhnPackageId } },
+    where: { userId, stqhnQuestion: { stqhnPackageId: pkg.id } },
     select: packageQuestionSelect
   });
   return packageDto(pkg, questionRows);
@@ -170,13 +178,17 @@ async function findActivePackage(
   const mostRecent = await tx.memorizationQuestion.findFirst({
     where: { userId, stqhnQuestionId: { not: null } },
     orderBy: { createdAt: "desc" },
-    select: { stqhnQuestion: { select: { stqhnPackageId: true } } }
+    select: {
+      stqhnQuestion: {
+        select: { stqhnPackage: { select: packageSelect } }
+      }
+    }
   });
   if (!mostRecent?.stqhnQuestion) return null;
-  const dto = await fetchPackageDto(
+  const dto = await fetchPackageQuestionsDto(
     tx,
     userId,
-    mostRecent.stqhnQuestion.stqhnPackageId
+    mostRecent.stqhnQuestion.stqhnPackage
   );
   return dto.state === "COMPLETED" ? null : dto;
 }
@@ -410,16 +422,42 @@ export async function getStqhnHistory(
   limit: number
 ): Promise<StqhnHistoryPage> {
   return measureServerTiming("stqhn_history", async () => {
-    // The bank contains only 93 packages / 372 questions. Reading the user's
-    // assessed rows once lets us paginate on the package boundary without a
-    // denormalized per-user package table or an unstable cross-relation cursor.
+    // First fetch only the compact ordered package index. The old query loaded
+    // every assessed question (including its revealed-verses JSON and display
+    // metadata) before slicing ten packages in memory. This retains the same
+    // package cursor contract while keeping the heavy query limited to the
+    // packages that are actually rendered on this page.
+    const packageIndex = await prisma.$queryRaw<
+      { packageId: string; latestAssessedAt: Date }[]
+    >(Prisma.sql`
+      SELECT sq."stqhnPackageId" AS "packageId",
+             MAX(qa."createdAt") AS "latestAssessedAt"
+      FROM "QuestionAssessment" qa
+      JOIN "MemorizationQuestion" mq ON mq.id = qa."questionId"
+      JOIN "StqhnQuestion" sq ON sq.id = mq."stqhnQuestionId"
+      WHERE qa."userId" = ${userId}
+        AND mq."userId" = ${userId}
+      GROUP BY sq."stqhnPackageId"
+      ORDER BY MAX(qa."createdAt") DESC, sq."stqhnPackageId" DESC
+    `);
+
+    const cursorIndex = cursor
+      ? packageIndex.findIndex((pkg) => pkg.packageId === cursor)
+      : -1;
+    const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+    const pageIndex = packageIndex.slice(start, start + limit);
+    const hasMore = start + limit < packageIndex.length;
+    if (pageIndex.length === 0) {
+      return { items: [], nextCursor: null };
+    }
+
+    const pagePackageIds = pageIndex.map((pkg) => pkg.packageId);
     const rows = await prisma.memorizationQuestion.findMany({
       where: {
         userId,
-        stqhnQuestionId: { not: null },
+        stqhnQuestion: { stqhnPackageId: { in: pagePackageIds } },
         assessment: { isNot: null }
       },
-      orderBy: [{ assessment: { createdAt: "desc" } }, { id: "desc" }],
       select: historySelect
     });
 
@@ -464,18 +502,19 @@ export async function getStqhnHistory(
       }
     }
 
-    const packages = [...grouped.values()].map((pkg) => ({
-      ...pkg,
-      questions: pkg.questions.sort(
-        (left, right) => left.questionOrder - right.questionOrder
-      )
-    }));
-    const cursorIndex = cursor
-      ? packages.findIndex((pkg) => pkg.packageId === cursor)
-      : -1;
-    const start = cursorIndex >= 0 ? cursorIndex + 1 : 0;
-    const page = packages.slice(start, start + limit);
-    const hasMore = start + limit < packages.length;
+    const page = pageIndex.flatMap(({ packageId, latestAssessedAt }) => {
+      const pkg = grouped.get(packageId);
+      if (!pkg) return [];
+      return [
+        {
+          ...pkg,
+          latestAssessedAt: latestAssessedAt.toISOString(),
+          questions: pkg.questions.sort(
+            (left, right) => left.questionOrder - right.questionOrder
+          )
+        }
+      ];
+    });
     return {
       items: page,
       nextCursor: hasMore ? (page.at(-1)?.packageId ?? null) : null
