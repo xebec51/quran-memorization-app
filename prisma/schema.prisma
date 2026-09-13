@@ -352,7 +352,7 @@ model QuestionAssessment {
   assessment  RecallAssessment
   // Objective MHQ-style scoring: number of bell rings / prompts needed
   // during self-assessment, replacing the old subjective three-way
-  // Benar/Sebagian benar/Belum ingat choice. Nullable and additive -
+  // Lancar/Belum Lancar classification. Nullable and additive -
   // existing rows created before this column existed keep their original
   // `assessment` value untouched and simply have NULL here; they are
   // never backfilled or reinterpreted. `assessment` itself is now derived

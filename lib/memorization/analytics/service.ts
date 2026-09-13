@@ -82,7 +82,7 @@ export async function getAnalytics(userId: string) {
           question."primaryPageNumber"::int AS "page",
           COUNT(DISTINCT question."id")::int AS "attempts",
           COUNT(hint."id")::int AS "hints",
-          COUNT(DISTINCT CASE WHEN assessment."assessment" = 'MISSED' THEN question."id" END)::int AS "misses"
+          COUNT(DISTINCT CASE WHEN assessment."assessment" IN ('MISSED', 'PARTIAL') THEN question."id" END)::int AS "misses"
         FROM "MemorizationQuestion" AS question
         LEFT JOIN "QuestionAssessment" AS assessment ON assessment."questionId" = question."id"
         LEFT JOIN "HintEvent" AS hint ON hint."questionId" = question."id"
@@ -90,7 +90,7 @@ export async function getAnalytics(userId: string) {
         GROUP BY question."primaryPageNumber"
         HAVING COUNT(DISTINCT question."id") >= 2
         ORDER BY (
-          COUNT(DISTINCT CASE WHEN assessment."assessment" = 'MISSED' THEN question."id" END) + COUNT(hint."id")
+          COUNT(DISTINCT CASE WHEN assessment."assessment" IN ('MISSED', 'PARTIAL') THEN question."id" END) + COUNT(hint."id")
         ) DESC
         LIMIT 8
       `,
@@ -128,10 +128,22 @@ export async function getAnalytics(userId: string) {
       pagesTested,
       packagesCompleted,
       totalQuestions,
-      assessmentDistribution: assessments.map((item) => ({
-        assessment: item.assessment,
-        count: item._count.assessment
-      })),
+      assessmentDistribution: [
+        {
+          assessment: "CORRECT",
+          count:
+            assessments.find((item) => item.assessment === "CORRECT")?._count
+              .assessment ?? 0
+        },
+        {
+          // PARTIAL only exists on legacy rows. It belongs to the same
+          // user-facing "Belum Lancar" classification as MISSED.
+          assessment: "MISSED",
+          count: assessments
+            .filter((item) => item.assessment !== "CORRECT")
+            .reduce((sum, item) => sum + item._count.assessment, 0)
+        }
+      ].filter((item) => item.count > 0),
       hintUsage: hints.map((item) => ({
         type: item.type,
         count: item._count.type

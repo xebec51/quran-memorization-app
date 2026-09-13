@@ -155,8 +155,10 @@ test("a MISSED question appears in the evaluation bank, prioritized over PARTIAL
   const bank = (await bankResponse.json()).data as {
     items: { questionId: string; lastResult: string }[];
     nextCursor: string | null;
+    totalCount: number;
   };
 
+  expect(bank.totalCount).toBe(3);
   expect(bank.items.map((item) => item.questionId).sort()).toEqual(
     [...questionIds.missed, ...questionIds.partial].sort()
   );

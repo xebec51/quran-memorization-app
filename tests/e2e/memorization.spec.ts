@@ -59,7 +59,7 @@ test("critical memorization flow", async ({
   await expect(page.getByText("Evaluasi jawaban")).toHaveCount(0);
 
   // Question 1: exercise every hint type (independent of reveal progress),
-  // then reveal fully and grade "Benar".
+  // then reveal fully and grade "Lancar".
   await page.getByRole("button", { name: "Juz" }).click();
   await expect(page.getByText(/Petunjuk Juz/)).toBeVisible();
 
@@ -147,7 +147,7 @@ test("critical memorization flow", async ({
   ).toBeVisible();
   await expect(
     page.getByRole("button", {
-      name: /Latih soal (belum ingat|sebagian benar)/
+      name: /Latih soal belum lancar/
     })
   ).toHaveCount(2);
 

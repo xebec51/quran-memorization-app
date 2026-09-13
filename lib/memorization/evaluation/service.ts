@@ -97,28 +97,33 @@ export async function getEvaluationBank(
   limit: number
 ): Promise<EvaluationBankPage> {
   return measureServerTiming("evaluation_bank", async () => {
-    const page = await paginateByCursor(
-      (args) =>
-        prisma.memorizationQuestion.findMany({
-          where: {
-            userId,
-            assessment: { assessment: { in: ["MISSED", "PARTIAL"] } },
-            evaluationClearedAt: null
-          },
-          // RecallAssessment's declaration order is CORRECT, PARTIAL,
-          // MISSED, so DESC yields MISSED first, then PARTIAL - id is a
-          // tiebreaker so the full ordering (and therefore cursor
-          // pagination across it) is deterministic even when many
-          // questions share the same result.
-          orderBy: [{ assessment: { assessment: "desc" } }, { id: "asc" }],
-          select: bankQuestionSelect,
-          ...args
-        }),
-      cursor,
-      limit,
-      (question) => question,
-      (question) => question.id
-    );
+    const where = {
+      userId,
+      assessment: { assessment: { in: ["MISSED", "PARTIAL"] } },
+      evaluationClearedAt: null
+    } satisfies Prisma.MemorizationQuestionWhereInput;
+
+    const [page, totalCount] = await Promise.all([
+      paginateByCursor(
+        (args) =>
+          prisma.memorizationQuestion.findMany({
+            where,
+            // RecallAssessment's declaration order is CORRECT, PARTIAL,
+            // MISSED, so DESC yields MISSED first, then PARTIAL - id is a
+            // tiebreaker so the full ordering (and therefore cursor
+            // pagination across it) is deterministic even when many
+            // questions share the same result.
+            orderBy: [{ assessment: { assessment: "desc" } }, { id: "asc" }],
+            select: bankQuestionSelect,
+            ...args
+          }),
+        cursor,
+        limit,
+        (question) => question,
+        (question) => question.id
+      ),
+      prisma.memorizationQuestion.count({ where })
+    ]);
 
     const fragments = await immutableFragmentTextsByQuestionId(
       prisma,
@@ -133,7 +138,7 @@ export async function getEvaluationBank(
         question.evaluationAttempts[0]?.createdAt.toISOString() ?? null
     }));
 
-    return { items, nextCursor: page.nextCursor };
+    return { items, nextCursor: page.nextCursor, totalCount };
   });
 }
 

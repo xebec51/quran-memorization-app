@@ -14,7 +14,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/client/api";
-import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
+import {
+  assessmentClassificationLabel,
+  formatAssessmentPerformance
+} from "@/lib/memorization/assessment";
 import {
   AssessmentForm,
   RevealSkeletonRow
@@ -32,6 +35,7 @@ type BankItem = {
 type BankPage = {
   items: BankItem[];
   nextCursor: string | null;
+  totalCount: number;
 };
 
 type RevealedAyah = {
@@ -107,12 +111,40 @@ export function EvaluationApp({
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attemptKeyRef = useRef<string>(crypto.randomUUID());
   const activeQuestionIdRef = useRef<string | null>(null);
+  const randomQuestionFocusRef = useRef<HTMLDivElement>(null);
+  const randomFocusQuestionIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
       if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      sessionLoading ||
+      !session ||
+      randomFocusQuestionIdRef.current !== session.questionId
+    ) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      const target = randomQuestionFocusRef.current;
+      if (!target) return;
+      randomFocusQuestionIdRef.current = null;
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      ).matches;
+      target.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "start"
+      });
+      target.focus({ preventScroll: true });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [session, sessionLoading]);
 
   async function selectQuestion(item: BankItem) {
     if (savedTimeoutRef.current) {
@@ -141,6 +173,9 @@ export function EvaluationApp({
       setSession(data);
     } catch (err) {
       if (activeQuestionIdRef.current !== item.questionId) return;
+      if (randomFocusQuestionIdRef.current === item.questionId) {
+        randomFocusQuestionIdRef.current = null;
+      }
       setListError(
         err instanceof Error ? err.message : "Gagal memuat sesi latihan."
       );
@@ -153,7 +188,7 @@ export function EvaluationApp({
   }
 
   async function selectRandomQuestion() {
-    if (randomLockRef.current || sessionLoading || bank.items.length === 0)
+    if (randomLockRef.current || sessionLoading || bank.totalCount === 0)
       return;
     randomLockRef.current = true;
     setRandomPending(true);
@@ -180,6 +215,7 @@ export function EvaluationApp({
           ? current
           : { ...current, items: [item, ...current.items] }
       );
+      randomFocusQuestionIdRef.current = item.questionId;
       await selectQuestion(item);
     } catch (err) {
       setListError(
@@ -271,14 +307,24 @@ export function EvaluationApp({
             [attempt.result]: current.resultCounts[attempt.result] + 1
           }
         }));
-        setBank((current) => ({
-          ...current,
-          items: current.items.map((item) =>
-            item.questionId === questionId
-              ? { ...item, lastAttemptAt: attempt.createdAt }
-              : item
-          )
-        }));
+        setBank((current) =>
+          attempt.result === "CORRECT"
+            ? {
+                ...current,
+                items: current.items.filter(
+                  (item) => item.questionId !== questionId
+                ),
+                totalCount: Math.max(0, current.totalCount - 1)
+              }
+            : {
+                ...current,
+                items: current.items.map((item) =>
+                  item.questionId === questionId
+                    ? { ...item, lastAttemptAt: attempt.createdAt }
+                    : item
+                )
+              }
+        );
       }
       if (activeQuestionIdRef.current === questionId) {
         setJustSaved({
@@ -327,7 +373,8 @@ export function EvaluationApp({
               )
           )
         ],
-        nextCursor: page.nextCursor
+        nextCursor: page.nextCursor,
+        totalCount: page.totalCount
       }));
     } catch (err) {
       setListError(
@@ -373,14 +420,14 @@ export function EvaluationApp({
         <div>
           <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
           <p className="mt-1 text-[var(--muted)]">
-            Latih ulang soal yang belum ingat atau sebagian benar, tanpa
-            mengganggu siklus 604 halaman.
+            Latih ulang soal yang belum lancar, tanpa mengganggu siklus 604
+            halaman.
           </p>
         </div>
         <Button
           variant="secondary"
           onClick={selectRandomQuestion}
-          disabled={randomPending || sessionLoading || bank.items.length === 0}
+          disabled={randomPending || sessionLoading || bank.totalCount === 0}
         >
           <Shuffle aria-hidden className="h-4 w-4" />
           {randomPending ? "Mengacak..." : "Acak soal"}
@@ -388,29 +435,35 @@ export function EvaluationApp({
       </div>
 
       <Card>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 sm:divide-x sm:divide-[var(--border)]">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5 lg:divide-x lg:divide-[var(--border)]">
           <Metric
             icon={ListChecks}
+            label="Soal evaluasi saat ini"
+            value={bank.totalCount}
+          />
+          <Metric
+            icon={History}
             label="Total percobaan"
             value={summary.totalAttempts}
+            className="lg:pl-4"
           />
           <Metric
             icon={AlarmClock}
             label="Total bel"
             value={summary.totalBelCount}
-            className="sm:pl-4"
+            className="lg:pl-4"
           />
           <Metric
             icon={Repeat}
             label="Total tuntun"
             value={summary.totalTuntunCount}
-            className="sm:pl-4"
+            className="lg:pl-4"
           />
           <Metric
             icon={CheckCircle2}
-            label="Benar"
+            label="Lancar"
             value={summary.resultCounts.CORRECT}
-            className="sm:pl-4"
+            className="lg:pl-4"
           />
         </div>
       </Card>
@@ -423,11 +476,15 @@ export function EvaluationApp({
 
       <Card>
         <h2 className="font-semibold">Bank Evaluasi</h2>
-        {bank.items.length === 0 ? (
+        {bank.totalCount === 0 ? (
           <p className="mt-2 text-sm text-[var(--muted)]">
             Belum ada soal yang perlu dilatih ulang. Soal akan muncul di sini
-            setelah dinilai &quot;Sebagian benar&quot; atau &quot;Belum
-            ingat&quot; pada latihan utama.
+            setelah dinilai &quot;Belum Lancar&quot; pada latihan utama.
+          </p>
+        ) : bank.items.length === 0 ? (
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Masih ada {bank.totalCount} soal evaluasi. Tekan &quot;Acak
+            soal&quot; atau muat halaman berikutnya untuk melanjutkan.
           </p>
         ) : (
           <div className="mt-3 grid gap-2">
@@ -439,16 +496,12 @@ export function EvaluationApp({
                   if (!sessionLoading) selectQuestion(item);
                 }}
                 aria-disabled={sessionLoading || undefined}
-                aria-label={`Latih soal ${item.lastResult === "MISSED" ? "belum ingat" : "sebagian benar"}: ${item.fragmentText}`}
+                aria-label={`Latih soal belum lancar: ${item.fragmentText}`}
                 className={`rounded-md border p-3 text-left text-sm transition ${sessionLoading ? "pointer-events-none opacity-70" : ""} ${item.questionId === selectedId ? "border-[var(--primary)] bg-emerald-50" : "border-[var(--border)] bg-white hover:bg-slate-50"}`}
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${item.lastResult === "MISSED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}
-                  >
-                    {item.lastResult === "MISSED"
-                      ? "Belum ingat"
-                      : "Sebagian benar"}
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900">
+                    Belum Lancar
                   </span>
                   {item.lastAttemptAt ? (
                     <span className="text-[10px] text-[var(--muted)]">
@@ -469,7 +522,7 @@ export function EvaluationApp({
             ))}
           </div>
         )}
-        {bank.nextCursor ? (
+        {bank.totalCount > 0 && bank.nextCursor ? (
           <Button
             variant="secondary"
             className="mt-3"
@@ -482,103 +535,114 @@ export function EvaluationApp({
       </Card>
 
       {selectedId && (sessionLoading || session) ? (
-        <Card className="grid gap-4 border-l-4 border-l-[var(--primary)] tasmiq-panel-enter">
-          <div>
-            <h2 className="font-semibold">Latihan ingatan</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Ingat ayat berikut dari hafalan, buka satu per satu untuk
-              memeriksa, lalu catat hasilnya.
-            </p>
-          </div>
-          {sessionError ? (
-            <p role="alert" className="text-sm text-[var(--danger)]">
-              {sessionError}
-            </p>
-          ) : null}
-          {sessionLoading || !session ? (
-            <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
-          ) : justSaved ? (
-            <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-              Tersimpan: {resultLabel(justSaved.result)} (bel{" "}
-              {justSaved.belCount}, tuntun {justSaved.tuntunCount})
-            </div>
-          ) : (
-            <>
-              <p
-                className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
-                translate="no"
-                lang="ar"
-                dir="rtl"
-              >
-                {session.fragmentText}
-                <span aria-hidden className="text-[var(--accent)]">
-                  {" "}
-                  ...
-                </span>
+        <div
+          ref={randomQuestionFocusRef}
+          tabIndex={-1}
+          aria-labelledby="evaluation-question-heading"
+          className="scroll-mt-20 outline-none"
+        >
+          <Card className="grid gap-4 border-l-4 border-l-[var(--primary)] tasmiq-panel-enter">
+            <div>
+              <h2 id="evaluation-question-heading" className="font-semibold">
+                Latihan ingatan
+              </h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">
+                Ingat ayat berikut dari hafalan, buka satu per satu untuk
+                memeriksa, lalu catat hasilnya.
               </p>
-              {session.verses.length > 0 || revealPending ? (
-                <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
-                  <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
-                    Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
-                    terbuka{session.isComplete ? " - halaman ini selesai" : ""}
-                  </p>
-                  <div className="grid gap-3 p-4 pt-0">
-                    {session.verses.map((verse) => (
-                      <div key={verse.verseKey} className="grid gap-1">
-                        <p className="text-xs text-[var(--muted)]">
-                          {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
-                          Halaman {verse.page}
-                        </p>
-                        <p
-                          className="quran-text text-right text-3xl"
-                          translate="no"
-                          lang="ar"
-                          dir="rtl"
-                        >
-                          {verse.text}
-                        </p>
-                      </div>
-                    ))}
-                    {revealPending ? <RevealSkeletonRow /> : null}
-                  </div>
-                </div>
-              ) : (
-                <p className="text-sm text-[var(--muted)]">
-                  Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
-                  terbuka
+            </div>
+            {sessionError ? (
+              <p role="alert" className="text-sm text-[var(--danger)]">
+                {sessionError}
+              </p>
+            ) : null}
+            {sessionLoading || !session ? (
+              <p className="text-sm text-[var(--muted)]">Memuat sesi...</p>
+            ) : justSaved ? (
+              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+                Tersimpan: {resultLabel(justSaved.result)} (bel{" "}
+                {justSaved.belCount}, tuntun {justSaved.tuntunCount})
+              </div>
+            ) : (
+              <>
+                <p
+                  className="quran-text rounded-md bg-[#fbfaf4] p-4 text-right text-3xl"
+                  translate="no"
+                  lang="ar"
+                  dir="rtl"
+                >
+                  {session.fragmentText}
+                  <span aria-hidden className="text-[var(--accent)]">
+                    {" "}
+                    ...
+                  </span>
                 </p>
-              )}
-              {!session.isComplete ? (
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <Button
-                    onClick={revealNext}
-                    disabled={revealPending || revealAllPending}
-                  >
-                    <Eye aria-hidden className="h-4 w-4" /> {revealButtonLabel}
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={revealAll}
-                    disabled={revealPending || revealAllPending}
-                  >
-                    <FastForward aria-hidden className="h-4 w-4" />{" "}
-                    {revealAllPending
-                      ? "Membuka semua ayat..."
-                      : "Soal selesai dijawab"}
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
-                  <p className="text-sm font-medium">Evaluasi jawaban</p>
-                  <AssessmentForm
-                    onAssess={submitAttempt}
-                    pending={submitPending}
-                  />
-                </div>
-              )}
-            </>
-          )}
-        </Card>
+                {session.verses.length > 0 || revealPending ? (
+                  <div className="grid max-h-[28rem] gap-3 overflow-y-auto rounded-md border border-[var(--border)] tasmiq-panel-enter">
+                    <p className="sticky top-0 z-10 border-b border-[var(--border)] bg-[#fbfaf4] px-4 py-2 text-sm text-[var(--muted)]">
+                      Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                      terbuka
+                      {session.isComplete ? " - halaman ini selesai" : ""}
+                    </p>
+                    <div className="grid gap-3 p-4 pt-0">
+                      {session.verses.map((verse) => (
+                        <div key={verse.verseKey} className="grid gap-1">
+                          <p className="text-xs text-[var(--muted)]">
+                            {verse.surah} - {verse.verseKey} - Juz {verse.juz} -
+                            Halaman {verse.page}
+                          </p>
+                          <p
+                            className="quran-text text-right text-3xl"
+                            translate="no"
+                            lang="ar"
+                            dir="rtl"
+                          >
+                            {verse.text}
+                          </p>
+                        </div>
+                      ))}
+                      {revealPending ? <RevealSkeletonRow /> : null}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-[var(--muted)]">
+                    Ayat {session.revealedAyahCount}/{session.totalAyahCount}{" "}
+                    terbuka
+                  </p>
+                )}
+                {!session.isComplete ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <Button
+                      onClick={revealNext}
+                      disabled={revealPending || revealAllPending}
+                    >
+                      <Eye aria-hidden className="h-4 w-4" />{" "}
+                      {revealButtonLabel}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={revealAll}
+                      disabled={revealPending || revealAllPending}
+                    >
+                      <FastForward aria-hidden className="h-4 w-4" />{" "}
+                      {revealAllPending
+                        ? "Membuka semua ayat..."
+                        : "Soal selesai dijawab"}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
+                    <p className="text-sm font-medium">Evaluasi jawaban</p>
+                    <AssessmentForm
+                      onAssess={submitAttempt}
+                      pending={submitPending}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        </div>
       ) : null}
 
       <Card>
@@ -613,12 +677,14 @@ export function EvaluationApp({
                 >
                   {attempt.fragmentText}
                 </p>
-                <p className="mt-1 text-xs text-[var(--muted)]">
-                  {formatAssessmentPerformance(
-                    attempt.belCount,
-                    attempt.tuntunCount
-                  )}
-                </p>
+                {attempt.result !== "CORRECT" ? (
+                  <p className="mt-1 text-xs text-[var(--muted)]">
+                    {formatAssessmentPerformance(
+                      attempt.belCount,
+                      attempt.tuntunCount
+                    )}
+                  </p>
+                ) : null}
               </div>
             ))}
           </div>
@@ -661,7 +727,5 @@ function Metric({
 }
 
 function resultLabel(result: Assessment) {
-  if (result === "CORRECT") return "Benar";
-  if (result === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
+  return assessmentClassificationLabel(result);
 }

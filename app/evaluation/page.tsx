@@ -20,7 +20,7 @@ export default async function EvaluationPage() {
       <Card>
         <h1 className="text-2xl font-semibold">Latihan Evaluasi</h1>
         <p className="mt-2 text-[var(--muted)]">
-          Masuk untuk berlatih soal yang belum ingat atau sebagian benar.
+          Masuk untuk berlatih soal yang belum lancar.
         </p>
         <Link href="/login">
           <Button className="mt-4">Masuk</Button>

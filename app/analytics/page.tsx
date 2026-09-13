@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getAnalytics } from "@/lib/memorization/analytics/service";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { assessmentClassificationLabel } from "@/lib/memorization/assessment";
+import type { RecallAssessment } from "@/lib/memorization/types";
 
 export const dynamic = "force-dynamic";
 
@@ -59,7 +61,7 @@ export default async function AnalyticsPage() {
         <div className="mt-3 grid gap-2">
           {data.bandPerformance.map((band) => (
             <div key={band.band} className="rounded-md bg-slate-50 p-3 text-sm">
-              Rentang {band.band}: {band.attempts} soal, {band.correct} benar,{" "}
+              Rentang {band.band}: {band.attempts} soal, {band.correct} lancar,{" "}
               {band.hints} petunjuk
             </div>
           ))}
@@ -70,7 +72,7 @@ export default async function AnalyticsPage() {
         <List
           rows={data.weakestPages.map((page) => [
             `Halaman ${page.page}`,
-            `${page.attempts} percobaan · ${page.hints} petunjuk · ${page.misses} belum ingat`
+            `${page.attempts} percobaan · ${page.hints} petunjuk · ${page.misses} belum lancar`
           ])}
           empty="Butuh minimal dua percobaan per halaman untuk menghitung kelemahan."
         />
@@ -113,9 +115,7 @@ function List({
 }
 
 function assessmentLabel(value: string) {
-  if (value === "CORRECT") return "Benar";
-  if (value === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
+  return assessmentClassificationLabel(value as RecallAssessment);
 }
 
 function hintLabel(value: string) {

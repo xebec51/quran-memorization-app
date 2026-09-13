@@ -25,7 +25,7 @@ export const revealIncompleteError = () =>
 export const evaluationNotEligibleError = () =>
   new DomainError(
     "EVALUATION_NOT_ELIGIBLE",
-    "Soal ini tidak tersedia untuk latihan evaluasi (hanya soal yang belum ingat atau sebagian benar).",
+    "Soal ini tidak tersedia untuk latihan evaluasi (hanya soal yang belum lancar).",
     409
   );
 export const evaluationAttemptConflictError = () =>

@@ -3,10 +3,11 @@ import type { RecallAssessment } from "./types";
 /**
  * Objective MHQ-style self-assessment: the user reports how many bel (bell
  * rings for a mistake) and tuntun (prompts needed) occurred, rather than
- * picking a subjective Benar/Sebagian benar/Belum ingat label. The stored
+ * picking a subjective result label. The stored
  * `assessment`/`result` enum is derived, not chosen - zero of both means a
- * clean pass (CORRECT); any bel or tuntun means the question needs further
- * practice (MISSED). PARTIAL is never produced by a new submission (main
+ * fluent result (CORRECT); any bel or tuntun means the question is not yet
+ * fluent and needs further practice (MISSED). PARTIAL is never produced by
+ * a new submission (main
  * cycle or evaluation practice) and remains a valid value only on
  * historical rows created before this change.
  *
@@ -19,6 +20,13 @@ export function deriveAssessment(
   tuntunCount: number
 ): RecallAssessment {
   return belCount === 0 && tuntunCount === 0 ? "CORRECT" : "MISSED";
+}
+
+/** The only two assessment classifications shown to users. */
+export function assessmentClassificationLabel(
+  assessment: RecallAssessment
+): "Lancar" | "Belum Lancar" {
+  return assessment === "CORRECT" ? "Lancar" : "Belum Lancar";
 }
 
 /** Compact result copy shared by every history view. */
@@ -35,5 +43,5 @@ export function formatAssessmentPerformance(
   if (bel > 0 && tuntun > 0) return `${bel} BEL • ${tuntun} TUNTUN`;
   if (bel > 0) return `${bel} BEL`;
   if (tuntun > 0) return `${tuntun} TUNTUN`;
-  return "Mulus";
+  return "Lancar";
 }

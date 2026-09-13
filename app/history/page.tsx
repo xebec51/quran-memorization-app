@@ -3,7 +3,11 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { getPackageHistory } from "@/lib/memorization/history/service";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
+import {
+  assessmentClassificationLabel,
+  formatAssessmentPerformance
+} from "@/lib/memorization/assessment";
+import type { RecallAssessment } from "@/lib/memorization/types";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +61,8 @@ export default async function HistoryPage({
                     ? assessmentLabel(question.assessment)
                     : "Belum dinilai"}{" "}
                   - {question.hints} petunjuk
-                  {formatAssessmentPerformance(
+                  {question.assessment !== "CORRECT" &&
+                  formatAssessmentPerformance(
                     question.belCount,
                     question.tuntunCount
                   ) ? (
@@ -136,7 +141,5 @@ export default async function HistoryPage({
 }
 
 function assessmentLabel(value: string) {
-  if (value === "CORRECT") return "Benar";
-  if (value === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
+  return assessmentClassificationLabel(value as RecallAssessment);
 }

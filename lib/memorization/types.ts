@@ -133,6 +133,7 @@ export type EvaluationBankItem = {
 export type EvaluationBankPage = {
   items: EvaluationBankItem[];
   nextCursor: string | null;
+  totalCount: number;
 };
 
 export type EvaluationSessionDto = RevealProgress & {

@@ -97,6 +97,7 @@ run("Evaluation Bank membership tracks the latest practice attempt", () => {
     expect(graded.assessment).toBe("MISSED");
 
     const bankBefore = await getEvaluationBank(userId, null, 50);
+    expect(bankBefore.totalCount).toBe(1);
     expect(
       bankBefore.items.some((item) => item.questionId === questionId)
     ).toBe(true);
@@ -114,6 +115,7 @@ run("Evaluation Bank membership tracks the latest practice attempt", () => {
     expect(pass.result).toBe("CORRECT");
 
     const bankAfterPass = await getEvaluationBank(userId, null, 50);
+    expect(bankAfterPass.totalCount).toBe(0);
     expect(
       bankAfterPass.items.some((item) => item.questionId === questionId)
     ).toBe(false);
@@ -139,6 +141,7 @@ run("Evaluation Bank membership tracks the latest practice attempt", () => {
     expect(missedAgain.result).toBe("MISSED");
 
     const bankAfterMiss = await getEvaluationBank(userId, null, 50);
+    expect(bankAfterMiss.totalCount).toBe(1);
     expect(
       bankAfterMiss.items.some((item) => item.questionId === questionId)
     ).toBe(true);

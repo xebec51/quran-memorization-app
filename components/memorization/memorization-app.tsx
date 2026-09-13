@@ -12,7 +12,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { productConfig } from "@/lib/config";
 import { apiFetch } from "@/lib/client/api";
-import { deriveAssessment } from "@/lib/memorization/assessment";
+import {
+  assessmentClassificationLabel,
+  deriveAssessment
+} from "@/lib/memorization/assessment";
 import { AssessmentForm, RevealSkeletonRow } from "./assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
@@ -679,7 +682,7 @@ function hintLabel(type: string) {
 }
 
 function assessmentLabel(assessment: Assessment | null) {
-  if (assessment === "CORRECT") return "Benar";
-  if (assessment === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
+  return assessment
+    ? assessmentClassificationLabel(assessment)
+    : "Belum dinilai";
 }

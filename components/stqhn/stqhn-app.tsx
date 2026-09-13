@@ -15,7 +15,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { apiFetch } from "@/lib/client/api";
-import { formatAssessmentPerformance } from "@/lib/memorization/assessment";
+import {
+  assessmentClassificationLabel,
+  formatAssessmentPerformance
+} from "@/lib/memorization/assessment";
 import { AssessmentForm } from "@/components/memorization/assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
@@ -110,9 +113,9 @@ function branchLabel(branch: CompetitionBranch) {
 }
 
 function assessmentLabel(assessment: Assessment | null) {
-  if (assessment === "CORRECT") return "Benar";
-  if (assessment === "PARTIAL") return "Sebagian benar";
-  return "Belum ingat";
+  return assessment
+    ? assessmentClassificationLabel(assessment)
+    : "Belum dinilai";
 }
 
 function firstActiveIndex(pkg: PackageDto) {
@@ -406,13 +409,13 @@ export function StqhnApp({
           />
           <Metric
             icon={CheckCircle2}
-            label="Benar"
+            label="Lancar"
             value={summary.correctCount}
             className="sm:pl-4"
           />
           <Metric
             icon={History}
-            label="Perlu evaluasi ulang"
+            label="Belum Lancar"
             value={summary.missedCount}
             className="sm:pl-4"
           />
@@ -568,11 +571,16 @@ export function StqhnApp({
                       </p>
                       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-[var(--muted)]">
-                          {formatAssessmentPerformance(
-                            item.belCount,
-                            item.tuntunCount
-                          )}{" "}
-                          - {new Date(item.assessedAt).toLocaleString("id-ID")}
+                          {item.assessment !== "CORRECT" ? (
+                            <>
+                              {formatAssessmentPerformance(
+                                item.belCount,
+                                item.tuntunCount
+                              )}{" "}
+                              -{" "}
+                            </>
+                          ) : null}
+                          {new Date(item.assessedAt).toLocaleString("id-ID")}
                         </p>
                         <a
                           href={item.sourceVideoUrl}
@@ -771,7 +779,7 @@ function QuestionPanel({
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm font-medium">Evaluasi jawaban</p>
           <p className="text-sm text-[var(--muted)]">
-            Hanya 0 bel dan 0 tuntun yang dianggap mulus. Jika ada kesalahan
+            Hanya 0 bel dan 0 tuntun yang dianggap lancar. Jika ada kesalahan
             atau tuntun, soal otomatis masuk ke Latihan Evaluasi.
           </p>
           <AssessmentForm onAssess={onAssess} pending={pendingAssessment} />
