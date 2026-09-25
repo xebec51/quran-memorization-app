@@ -65,6 +65,10 @@ select {
   animation: tasmiq-panel-enter 160ms ease-out;
 }
 
+.tasmiq-audio-active {
+  animation: tasmiq-audio-pulse 1.5s ease-in-out infinite;
+}
+
 @keyframes tasmiq-panel-enter {
   from {
     opacity: 0;
@@ -76,12 +80,26 @@ select {
   }
 }
 
+@keyframes tasmiq-audio-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(242 189 98 / 0.1);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgb(242 189 98 / 0.18);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
 
   .tasmiq-panel-enter {
+    animation: none;
+  }
+
+  .tasmiq-audio-active {
     animation: none;
   }
 }

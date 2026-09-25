@@ -22,6 +22,7 @@ import type {
   HintCounts,
   HintMutationResult,
   HintType,
+  MemorizationScope,
   PublicHint,
   PublicQuestion,
   QuranWordRef,
@@ -62,6 +63,8 @@ const packageDtoSelect = {
     select: {
       id: true,
       cycleNumber: true,
+      scope: true,
+      plan: true,
       state: true,
       _count: {
         select: {
@@ -79,6 +82,7 @@ const packageDtoSelect = {
 const cycleForAllocationSelect = {
   id: true,
   cycleNumber: true,
+  scope: true,
   state: true,
   plan: true,
   nextPackageNo: true
@@ -125,9 +129,12 @@ const extensionWordSelect = {
   textUthmani: true
 } satisfies Prisma.QuranWordSelect;
 
-export async function getOrAllocateNextPackage(userId: string) {
+export async function getOrAllocateNextPackage(
+  userId: string,
+  scope: MemorizationScope = "THIRTY_JUZ"
+) {
   return measureServerTiming("next_package", async () => {
-    const existing = await findExistingPackage(prisma, userId);
+    const existing = await findExistingPackage(prisma, userId, scope);
     if (existing) return packageDtoFromRecord(existing);
 
     return retrySerialization(async () =>
@@ -135,37 +142,39 @@ export async function getOrAllocateNextPackage(userId: string) {
         async (tx) => {
           const existingInsideTransaction = await findExistingPackage(
             tx,
-            userId
+            userId,
+            scope
           );
           if (existingInsideTransaction)
             return packageDtoFromRecord(existingInsideTransaction);
 
           let cycle = await tx.memorizationCycle.findFirst({
-            where: { userId, state: "ACTIVE" },
+            where: { userId, scope, state: "ACTIVE" },
             orderBy: { cycleNumber: "desc" },
             select: cycleForAllocationSelect
           });
 
           if (!cycle) {
             const lastCycle = await tx.memorizationCycle.findFirst({
-              where: { userId },
+              where: { userId, scope },
               orderBy: { cycleNumber: "desc" },
               select: { cycleNumber: true }
             });
             cycle = await createCycle(
               tx,
               userId,
+              scope,
               (lastCycle?.cycleNumber ?? 0) + 1
             );
           }
 
-          if (cycle.nextPackageNo > productConfig.packagesPerCycle) {
+          if (cycle.nextPackageNo > packagesInPlan(cycle.plan)) {
             await tx.memorizationCycle.update({
               where: { id: cycle.id },
               data: { state: "COMPLETED", completedAt: new Date() },
               select: { id: true }
             });
-            cycle = await createCycle(tx, userId, cycle.cycleNumber + 1);
+            cycle = await createCycle(tx, userId, scope, cycle.cycleNumber + 1);
           }
 
           return allocatePackage(tx, userId, cycle);
@@ -179,9 +188,12 @@ export async function getOrAllocateNextPackage(userId: string) {
   });
 }
 
-export async function getCurrentPackage(userId: string) {
+export async function getCurrentPackage(
+  userId: string,
+  scope?: MemorizationScope
+) {
   return measureServerTiming("current_package", async () => {
-    const pkg = await findExistingPackage(prisma, userId);
+    const pkg = await findExistingPackage(prisma, userId, scope);
     return pkg ? packageDtoFromRecord(pkg) : null;
   });
 }
@@ -436,10 +448,15 @@ export async function getUserProgress(userId: string) {
 
 async function findExistingPackage(
   tx: Prisma.TransactionClient | typeof prisma,
-  userId: string
+  userId: string,
+  scope?: MemorizationScope
 ) {
   return tx.memorizationPackage.findFirst({
-    where: { userId, state: "IN_PROGRESS" },
+    where: {
+      userId,
+      state: "IN_PROGRESS",
+      ...(scope ? { cycle: { scope } } : {})
+    },
     orderBy: { createdAt: "desc" },
     select: packageDtoSelect
   });
@@ -448,6 +465,7 @@ async function findExistingPackage(
 async function createCycle(
   tx: Prisma.TransactionClient,
   userId: string,
+  scope: MemorizationScope,
   cycleNumber: number
 ) {
   const pages = await tx.quranPage.findMany({
@@ -460,11 +478,17 @@ async function createCycle(
     );
   }
   const seed = randomBytes(16).toString("hex");
-  const plan = createCyclePlan(pages, seed, new SeededRandomSource(seed));
+  const plan = createCyclePlan(
+    pages,
+    seed,
+    new SeededRandomSource(seed),
+    scope
+  );
   return tx.memorizationCycle.create({
     data: {
       userId,
       cycleNumber,
+      scope,
       seed,
       plan: plan as unknown as Prisma.InputJsonValue
     },
@@ -554,20 +578,23 @@ async function allocatePackage(
       cycle: {
         id: cycle.id,
         cycleNumber: cycle.cycleNumber,
+        scope: cycle.scope,
         state: cycle.state,
-        pagesTested: Math.min(
-          productConfig.mushafPages,
-          cycle.nextPackageNo * productConfig.questionsPerPackage
-        )
+        pagesTested: pagesTestedThroughPackage(plan, cycle.nextPackageNo),
+        targetPages: plan.targetPageCount
       },
-      questions: questionRows.map(publicQuestionFromGeneratedRow),
+      questions: questionRows.map((question) =>
+        publicQuestionFromGeneratedRow(question, questionRows.length)
+      ),
       activeQuestionId: questionRows[0]?.id ?? null
     };
   });
 }
 
 function packageDtoFromRecord(pkg: PackageForDto) {
-  const questions = pkg.questions.map(publicQuestionFromRecord);
+  const questions = pkg.questions.map((question) =>
+    publicQuestionFromRecord(question, pkg.questions.length)
+  );
   return {
     id: pkg.id,
     packageNumber: pkg.packageNumber,
@@ -575,8 +602,10 @@ function packageDtoFromRecord(pkg: PackageForDto) {
     cycle: {
       id: pkg.cycle.id,
       cycleNumber: pkg.cycle.cycleNumber,
+      scope: pkg.cycle.scope,
       state: pkg.cycle.state,
-      pagesTested: pkg.cycle._count.questions
+      pagesTested: pkg.cycle._count.questions,
+      targetPages: targetPageCountFromPlan(pkg.cycle.plan)
     },
     questions,
     activeQuestionId:
@@ -585,7 +614,8 @@ function packageDtoFromRecord(pkg: PackageForDto) {
 }
 
 function publicQuestionFromRecord(
-  question: QuestionForPublicDto
+  question: QuestionForPublicDto,
+  totalQuestions: number
 ): PublicQuestion {
   const counts = hintCountsFromEvents(question.hintEvents);
   const revealedAyahCount = question.revealedAyahCount;
@@ -602,7 +632,7 @@ function publicQuestionFromRecord(
   return {
     id: question.id,
     order: question.orderInPackage,
-    totalQuestions: productConfig.questionsPerPackage,
+    totalQuestions,
     fragmentText: question.visibleFragmentText,
     availableHints: availableHintsFromCounts(question, counts),
     hints: question.hintEvents.map((event) => ({
@@ -620,12 +650,13 @@ function publicQuestionFromRecord(
 }
 
 function publicQuestionFromGeneratedRow(
-  question: GeneratedQuestionRow
+  question: GeneratedQuestionRow,
+  totalQuestions: number
 ): PublicQuestion {
   return {
     id: question.id,
     order: question.orderInPackage,
-    totalQuestions: productConfig.questionsPerPackage,
+    totalQuestions,
     fragmentText: question.visibleFragmentText,
     availableHints: availableHintsFromCounts(question, emptyHintCounts()),
     hints: [],
@@ -779,16 +810,16 @@ async function completePackageIfReady(
 ) {
   if (!packageId) return false;
   // Single round trip instead of 3 (two counts + a separate package fetch):
-  // a package only ever has productConfig.questionsPerPackage (4) questions,
-  // so pulling their assessment presence inline is cheap, and this is the
-  // hot path (runs on every assessment submission, including idempotent
-  // repeats on an already-completed package).
+  // a package is tiny (normally 4 questions, with a possible shorter final
+  // scope-cycle package), so pulling assessment presence inline is cheap on
+  // the hot assessment path.
   const pkg = await tx.memorizationPackage.findUniqueOrThrow({
     where: { id: packageId },
     select: {
       state: true,
       cycleId: true,
       packageNumber: true,
+      cycle: { select: { plan: true } },
       questions: { select: { assessment: { select: { id: true } } } }
     }
   });
@@ -796,11 +827,7 @@ async function completePackageIfReady(
   const assessedCount = pkg.questions.filter(
     (question) => question.assessment
   ).length;
-  if (
-    questionCount !== productConfig.questionsPerPackage ||
-    assessedCount !== questionCount
-  )
-    return false;
+  if (questionCount === 0 || assessedCount !== questionCount) return false;
   if (pkg.state === "COMPLETED") return true;
 
   await tx.memorizationPackage.update({
@@ -809,7 +836,7 @@ async function completePackageIfReady(
     select: { id: true }
   });
 
-  if (pkg.packageNumber === productConfig.packagesPerCycle) {
+  if (pkg.packageNumber === packagesInPlan(pkg.cycle.plan)) {
     const inProgressPackages = await tx.memorizationPackage.count({
       where: { cycleId: pkg.cycleId, state: "IN_PROGRESS" }
     });
@@ -854,3 +881,17 @@ type GeneratedQuestionRow = Prisma.MemorizationQuestionCreateManyInput & {
   revealBoundaryVerseId: number;
   revealTotalAyahCount: number;
 };
+
+function packagesInPlan(planValue: Prisma.JsonValue) {
+  return (planValue as unknown as CyclePlan).packages.length;
+}
+
+function targetPageCountFromPlan(planValue: Prisma.JsonValue) {
+  return (planValue as unknown as CyclePlan).targetPageCount;
+}
+
+function pagesTestedThroughPackage(plan: CyclePlan, packageNumber: number) {
+  return plan.packages
+    .slice(0, packageNumber)
+    .reduce((sum, pkg) => sum + pkg.questions.length, 0);
+}

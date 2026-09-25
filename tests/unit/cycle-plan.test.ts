@@ -23,6 +23,62 @@ describe("cycle plan invariants", () => {
     }
   });
 
+  it("creates 20-juz packages with 2 questions from each included band before a no-repeat remainder", () => {
+    const plan = createCyclePlan(
+      syntheticCyclePages(),
+      "twenty",
+      new SeededRandomSource("twenty"),
+      "TWENTY_JUZ"
+    );
+    validateCyclePlan(plan);
+
+    const pages = plan.packages.flatMap((pkg) =>
+      pkg.questions.map((question) => question.pageNumber)
+    );
+    expect(plan.scope).toBe("TWENTY_JUZ");
+    expect(pages).toHaveLength(403);
+    expect(new Set(pages).size).toBe(403);
+
+    for (const pkg of plan.packages.slice(0, -1)) {
+      expect(
+        pkg.questions.filter((question) => question.juzBand === "A")
+      ).toHaveLength(2);
+      expect(
+        pkg.questions.filter((question) => question.juzBand === "B")
+      ).toHaveLength(2);
+      expect(pkg.questions.some((question) => question.juzBand === "C")).toBe(
+        false
+      );
+    }
+    expect(plan.packages.at(-1)?.questions).toHaveLength(3);
+  });
+
+  it("creates 10-juz packages from four page quarters before a no-repeat remainder", () => {
+    const plan = createCyclePlan(
+      syntheticCyclePages(),
+      "ten",
+      new SeededRandomSource("ten"),
+      "TEN_JUZ"
+    );
+    validateCyclePlan(plan);
+
+    const pages = plan.packages.flatMap((pkg) =>
+      pkg.questions.map((question) => question.pageNumber)
+    );
+    expect(plan.scope).toBe("TEN_JUZ");
+    expect(pages).toHaveLength(202);
+    expect(new Set(pages).size).toBe(202);
+    for (const pkg of plan.packages.slice(0, -1)) {
+      expect(
+        new Set(pkg.questions.map((question) => question.segment))
+      ).toEqual(new Set(["Q1", "Q2", "Q3", "Q4"]));
+      expect(pkg.questions.every((question) => question.juzBand === "A")).toBe(
+        true
+      );
+    }
+    expect(plan.packages.at(-1)?.questions).toHaveLength(2);
+  });
+
   it("consumes 604 unique primary pages without repeats", () => {
     const plan = createCyclePlan(
       syntheticCyclePages(),

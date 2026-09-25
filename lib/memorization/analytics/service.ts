@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db/prisma";
 import { measureServerTiming } from "@/lib/performance/timing";
+import { scopeLabel } from "../cycle/plan";
+import type { CyclePlan } from "../types";
 
 type BandPerformanceRow = {
   band: "A" | "B" | "C";
@@ -20,8 +22,8 @@ export async function getAnalytics(userId: string) {
   return measureServerTiming("analytics_query", async () => {
     const cycle = await prisma.memorizationCycle.findFirst({
       where: { userId },
-      orderBy: { cycleNumber: "desc" },
-      select: { id: true, cycleNumber: true }
+      orderBy: { createdAt: "desc" },
+      select: { id: true, cycleNumber: true, scope: true, plan: true }
     });
 
     const [
@@ -123,10 +125,15 @@ export async function getAnalytics(userId: string) {
       };
     });
 
+    const plan = cycle?.plan as unknown as CyclePlan | undefined;
+
     return {
       cycleNumber: cycle?.cycleNumber ?? 1,
+      scopeLabel: cycle ? scopeLabel(cycle.scope) : "30 Juz",
       pagesTested,
+      targetPages: plan?.targetPageCount ?? 604,
       packagesCompleted,
+      packagesPerCycle: plan?.packages.length ?? 151,
       totalQuestions,
       assessmentDistribution: [
         {

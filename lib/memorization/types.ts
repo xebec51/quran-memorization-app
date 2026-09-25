@@ -2,6 +2,7 @@ export type JuzBand = "A" | "B" | "C";
 export type PagePositionBucket = "START" | "MIDDLE" | "END";
 export type HintType = "JUZ" | "SURAH" | "EXTEND_FRAGMENT" | "NEXT_VERSE";
 export type RecallAssessment = "CORRECT" | "PARTIAL" | "MISSED";
+export type MemorizationScope = "THIRTY_JUZ" | "TWENTY_JUZ" | "TEN_JUZ";
 
 export type CyclePage = {
   pageNumber: number;
@@ -11,7 +12,8 @@ export type CyclePage = {
 export type CyclePlanQuestion = {
   pageNumber: number;
   juzBand: JuzBand;
-  slot: "MANDATORY" | "WILDCARD";
+  slot: "MANDATORY" | "WILDCARD" | "QUARTER" | "REMAINDER";
+  segment?: string;
 };
 
 export type CyclePlanPackage = {
@@ -20,10 +22,12 @@ export type CyclePlanPackage = {
 };
 
 export type CyclePlan = {
-  version: 1;
+  version: 2;
   seed: string;
+  scope: MemorizationScope;
   packagesPerCycle: number;
   questionsPerPackage: number;
+  targetPageCount: number;
   wildcardQuotas: Record<JuzBand, number>;
   packages: CyclePlanPackage[];
 };

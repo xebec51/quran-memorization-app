@@ -28,10 +28,17 @@ export default async function AnalyticsPage() {
         <BarChart3 aria-hidden className="h-6 w-6 text-[var(--primary)]" />
         <h1 className="text-2xl font-semibold">Analitik</h1>
       </div>
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-5">
+        <Metric label="Mode" value={data.scopeLabel} />
         <Metric label="Siklus" value={data.cycleNumber} />
-        <Metric label="Halaman diuji" value={`${data.pagesTested}/604`} />
-        <Metric label="Paket selesai" value={`${data.packagesCompleted}/151`} />
+        <Metric
+          label="Halaman diuji"
+          value={`${data.pagesTested}/${data.targetPages}`}
+        />
+        <Metric
+          label="Paket selesai"
+          value={`${data.packagesCompleted}/${data.packagesPerCycle}`}
+        />
         <Metric label="Total soal" value={data.totalQuestions} />
       </div>
       <div className="grid gap-4 md:grid-cols-2">

@@ -43,7 +43,8 @@ export default async function HistoryPage({
         <Card key={pkg.id}>
           <div className="flex flex-wrap justify-between gap-2">
             <h2 className="font-semibold">
-              Siklus {pkg.cycleNumber} - Paket {pkg.packageNumber}
+              {pkg.scopeLabel} - Siklus {pkg.cycleNumber} - Paket{" "}
+              {pkg.packageNumber}
             </h2>
             <span className="text-sm text-[var(--muted)]">
               {pkg.state === "COMPLETED" ? "Selesai" : "Berjalan"}

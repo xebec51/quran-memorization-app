@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookMarked,
+  Check,
+  CheckCircle2,
   Eye,
   FastForward,
+  FileText,
+  Headphones,
   Lightbulb,
-  MapPinned
+  MapPinned,
+  Play,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,6 +26,7 @@ import {
 import { AssessmentForm, RevealSkeletonRow } from "./assessment-form";
 
 type Assessment = "CORRECT" | "PARTIAL" | "MISSED";
+type MemorizationScope = "THIRTY_JUZ" | "TWENTY_JUZ" | "TEN_JUZ";
 
 type RevealedAyah = {
   verseKey: string;
@@ -57,7 +65,13 @@ type PackageDto = {
   id: string;
   packageNumber: number;
   state: string;
-  cycle: { cycleNumber: number; state: string; pagesTested: number };
+  cycle: {
+    cycleNumber: number;
+    scope: MemorizationScope;
+    state: string;
+    pagesTested: number;
+    targetPages: number;
+  };
   questions: Question[];
   activeQuestionId: string | null;
 };
@@ -88,6 +102,38 @@ type PendingAssessment = {
   tuntunCount: number;
 };
 
+const scopeOptions = [
+  {
+    value: "THIRTY_JUZ",
+    label: "30 Juz",
+    description: "Juz 1-30",
+    distribution: "3 wilayah wajib + 1 acak"
+  },
+  {
+    value: "TWENTY_JUZ",
+    label: "20 Juz",
+    description: "Juz 1-20",
+    distribution: "2 soal Juz 1-10 + 2 soal Juz 11-20"
+  },
+  {
+    value: "TEN_JUZ",
+    label: "10 Juz",
+    description: "Juz 1-10",
+    distribution: "1 soal dari tiap seperempat bagian"
+  }
+] as const satisfies readonly {
+  value: MemorizationScope;
+  label: string;
+  description: string;
+  distribution: string;
+}[];
+
+function scopeLabel(scope: MemorizationScope) {
+  return (
+    scopeOptions.find((option) => option.value === scope)?.label ?? "30 Juz"
+  );
+}
+
 function firstActiveIndex(pkg: PackageDto) {
   if (pkg.activeQuestionId) {
     const index = pkg.questions.findIndex(
@@ -104,6 +150,9 @@ export function MemorizationApp({
   initialPackage?: PackageDto | null;
 }) {
   const [pkg, setPkg] = useState<PackageDto | null>(initialPackage);
+  const [selectedScope, setSelectedScope] = useState<MemorizationScope>(
+    initialPackage?.cycle.scope ?? "THIRTY_JUZ"
+  );
   const [activeIndex, setActiveIndex] = useState(() =>
     initialPackage ? firstActiveIndex(initialPackage) : 0
   );
@@ -153,7 +202,12 @@ export function MemorizationApp({
   async function loadPackage() {
     if (pendingAssessmentCount > 0 || !beginAction("package")) return;
     try {
-      const data = await apiFetch<PackageDto>("/api/memorization/next-package");
+      const data = await apiFetch<PackageDto>(
+        "/api/memorization/next-package",
+        {
+          scope: selectedScope
+        }
+      );
       setPkg(data);
       setActiveIndex(firstActiveIndex(data));
     } catch (err) {
@@ -366,20 +420,50 @@ export function MemorizationApp({
 
   if (!pkg || !question) {
     return (
-      <Card className="grid gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Latihan Expert</h1>
-          <p className="mt-1 text-[var(--muted)]">{productConfig.tagline}</p>
+      <div className="mx-auto grid max-w-4xl gap-6 pb-24">
+        <div className="flex items-start gap-4">
+          <div className="flex size-12 shrink-0 items-center justify-center rounded-md bg-[var(--primary)] text-white shadow-sm">
+            <Headphones aria-hidden className="size-6" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-[var(--primary)]">
+              Latihan utama
+            </p>
+            <h1 className="mt-1 text-3xl font-semibold">Tes hafalan</h1>
+            <p className="mt-2 max-w-2xl text-[var(--muted)]">
+              {productConfig.tagline}
+            </p>
+          </div>
         </div>
-        {error ? (
-          <p role="alert" className="text-sm text-[var(--danger)]">
-            {error}
-          </p>
-        ) : null}
-        <Button onClick={loadPackage} disabled={pendingAction === "package"}>
-          {pendingAction === "package" ? "Memuat..." : "Mulai latihan"}
-        </Button>
-      </Card>
+        <Card className="grid gap-6 p-5 md:p-6">
+          <ScopeSelector
+            value={selectedScope}
+            disabled={pendingAction !== null}
+            onChange={setSelectedScope}
+          />
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-[var(--danger)]"
+            >
+              {error}
+            </p>
+          ) : null}
+          <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-[var(--muted)]">
+              Setiap halaman muncul satu kali sebelum siklus berulang.
+            </p>
+            <Button
+              className="w-full sm:w-auto"
+              onClick={loadPackage}
+              disabled={pendingAction === "package"}
+            >
+              <Play aria-hidden className="size-4 fill-current" />
+              {pendingAction === "package" ? "Menyiapkan..." : "Mulai latihan"}
+            </Button>
+          </div>
+        </Card>
+      </div>
     );
   }
 
@@ -388,6 +472,15 @@ export function MemorizationApp({
   if (packageComplete) {
     return (
       <div className="grid gap-4 pb-24">
+        <ScopeSelector
+          value={selectedScope}
+          disabled={pendingAction !== null || pendingAssessmentCount > 0}
+          onChange={(scope) => {
+            setSelectedScope(scope);
+            setPkg(null);
+            setActiveIndex(0);
+          }}
+        />
         <MemorizationHeader
           pkg={pkg}
           pendingAssessmentCount={pendingAssessmentCount}
@@ -421,7 +514,11 @@ export function MemorizationApp({
         pkg={pkg}
         pendingAssessmentCount={pendingAssessmentCount}
       />
-      <div className="grid grid-cols-4 gap-2" aria-label="Pertanyaan">
+      <div
+        className="grid gap-2"
+        style={{ gridTemplateColumns: `repeat(${pkg.questions.length}, 1fr)` }}
+        aria-label="Pertanyaan"
+      >
         {pkg.questions.map((item, index) => (
           <button
             key={item.id}
@@ -437,15 +534,16 @@ export function MemorizationApp({
             onClick={() => {
               setActiveIndex(index);
             }}
-            className={`rounded-md border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-55 ${
+            className={`flex min-h-11 items-center justify-center gap-2 rounded-md border px-2 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-55 ${
               index === activeIndex
-                ? "border-[var(--primary)] bg-emerald-50"
+                ? "border-[var(--primary)] bg-[var(--primary)] text-white shadow-sm"
                 : item.assessment
                   ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : "border-[var(--border)] bg-white"
+                  : "border-[var(--border)] bg-white hover:border-slate-300 hover:bg-slate-50"
             }`}
           >
-            {item.order}
+            {item.assessment ? <Check aria-hidden className="size-4" /> : null}
+            <span>Soal {item.order}</span>
           </button>
         ))}
       </div>
@@ -470,6 +568,63 @@ export function MemorizationApp({
   );
 }
 
+function ScopeSelector({
+  value,
+  disabled,
+  onChange
+}: {
+  value: MemorizationScope;
+  disabled: boolean;
+  onChange: (scope: MemorizationScope) => void;
+}) {
+  return (
+    <fieldset className="grid gap-3" disabled={disabled}>
+      <legend className="text-lg font-semibold">Pilih cakupan hafalan</legend>
+      <div className="grid gap-3 md:grid-cols-3">
+        {scopeOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={value === option.value}
+            onClick={() => onChange(option.value)}
+            className={`relative min-h-32 rounded-md border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${
+              value === option.value
+                ? "border-[var(--primary)] bg-emerald-50 shadow-sm"
+                : "border-[var(--border)] bg-white hover:border-slate-300 hover:bg-slate-50"
+            }`}
+          >
+            <span className="flex items-start justify-between gap-3">
+              <span>
+                <span className="block text-lg font-semibold">
+                  {option.label}
+                </span>
+                <span className="mt-0.5 block text-xs font-medium uppercase text-[var(--muted)]">
+                  {option.description}
+                </span>
+              </span>
+              <span
+                className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${
+                  value === option.value
+                    ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+                    : "border-[var(--border)] bg-white text-transparent"
+                }`}
+              >
+                <Check aria-hidden className="size-3.5" />
+              </span>
+            </span>
+            <span className="mt-4 block text-sm leading-5 text-[var(--muted)]">
+              {option.distribution}
+            </span>
+            <span className="mt-2 block text-xs font-medium text-[var(--primary)]">
+              4 soal per paket
+            </span>
+          </button>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 function MemorizationHeader({
   pkg,
   pendingAssessmentCount
@@ -477,11 +632,17 @@ function MemorizationHeader({
   pkg: PackageDto;
   pendingAssessmentCount: number;
 }) {
+  const progress = Math.min(
+    100,
+    Math.round((pkg.cycle.pagesTested / pkg.cycle.targetPages) * 100)
+  );
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div>
+    <div className="grid gap-3 rounded-md border border-[var(--border)] bg-white p-4 shadow-sm md:grid-cols-[1fr_auto] md:items-center">
+      <div className="min-w-0">
         <p className="text-sm font-medium text-[var(--muted)]">
-          Siklus {pkg.cycle.cycleNumber} - Paket {pkg.packageNumber}
+          {scopeLabel(pkg.cycle.scope)} - Siklus {pkg.cycle.cycleNumber} - Paket{" "}
+          {pkg.packageNumber}
         </p>
         <h1 className="text-2xl font-semibold">Latihan Expert</h1>
         {pendingAssessmentCount > 0 ? (
@@ -490,8 +651,29 @@ function MemorizationHeader({
           </p>
         ) : null}
       </div>
-      <div className="rounded-md border border-[var(--border)] bg-white px-3 py-2 text-sm">
-        {pkg.cycle.pagesTested}/604 halaman
+      <div className="grid min-w-44 gap-2">
+        <div className="flex items-center justify-between gap-3 text-xs font-medium text-[var(--muted)]">
+          <span>Progres siklus</span>
+          <span>
+            {pkg.cycle.pagesTested}/{pkg.cycle.targetPages}
+          </span>
+        </div>
+        <div
+          className="h-2 overflow-hidden rounded-full bg-slate-100"
+          role="progressbar"
+          aria-label="Progres halaman dalam siklus"
+          aria-valuemin={0}
+          aria-valuemax={pkg.cycle.targetPages}
+          aria-valuenow={pkg.cycle.pagesTested}
+        >
+          <div
+            className="h-full rounded-full bg-[var(--accent)] transition-[width]"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-right text-xs text-[var(--muted)]">
+          {progress}% halaman teruji
+        </p>
       </div>
     </div>
   );
@@ -518,6 +700,9 @@ function QuestionPanel({
 }) {
   const questionComplete = question.assessment !== null;
   const reveal = question.reveal;
+  const [showVisualPrompt, setShowVisualPrompt] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechError, setSpeechError] = useState<string | null>(null);
   // Grading is only allowed once the entire boundary has been revealed -
   // enforced again server-side in submitAssessment - so there is no
   // separate "grade early" affordance; this panel simply appears once
@@ -530,23 +715,125 @@ function QuestionPanel({
       : "Lihat Ayat Berikutnya";
   }, [pendingAction, reveal.revealedAyahCount]);
 
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis?.cancel();
+    };
+  }, [question.id]);
+
+  function speakPrompt() {
+    if (!("speechSynthesis" in window)) {
+      setSpeechError("Audio tidak tersedia di browser ini.");
+      setShowVisualPrompt(true);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(question.fragmentText);
+    utterance.lang = "ar-SA";
+    utterance.rate = 0.82;
+    const arabicVoice = window.speechSynthesis
+      .getVoices()
+      .find((voice) => voice.lang.toLowerCase().startsWith("ar"));
+    if (arabicVoice) utterance.voice = arabicVoice;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => {
+      setIsSpeaking(false);
+      setSpeechError("Audio gagal diputar. Gunakan teks soal.");
+      setShowVisualPrompt(true);
+    };
+    setSpeechError(null);
+    setIsSpeaking(true);
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function stopPrompt() {
+    window.speechSynthesis?.cancel();
+    setIsSpeaking(false);
+  }
+
   return (
     <div className="grid gap-5 tasmiq-panel-enter">
-      <div
-        className="quran-text min-h-44 rounded-md bg-[#fbfaf4] p-5 text-right text-4xl leading-loose md:text-5xl"
-        translate="no"
-        lang="ar"
-        dir="rtl"
-      >
-        {question.fragmentText}
-        <span aria-hidden className="text-[var(--accent)]">
-          {" "}
-          ...
-        </span>
-      </div>
+      <section className="overflow-hidden rounded-md border border-[#27584b] bg-[#173b32] text-white shadow-sm">
+        <div className="grid gap-5 p-5 sm:grid-cols-[auto_1fr] sm:items-center md:p-6">
+          <div
+            className={`flex size-16 items-center justify-center rounded-full bg-white/10 text-[#f2bd62] ${isSpeaking ? "tasmiq-audio-active" : ""}`}
+          >
+            <Headphones aria-hidden className="size-8" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase text-emerald-100">
+              Soal {question.order} dari {question.totalQuestions}
+            </p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 className="text-xl font-semibold">Audio soal</h2>
+              <span className="text-sm text-emerald-100" aria-live="polite">
+                {isSpeaking ? "Sedang diputar" : "Siap diputar"}
+              </span>
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                onClick={speakPrompt}
+                className="bg-white text-[#173b32] hover:bg-emerald-50"
+              >
+                <Volume2 aria-hidden className="size-4" />
+                {isSpeaking ? "Putar ulang" : "Putar soal"}
+              </Button>
+              {isSpeaking ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={stopPrompt}
+                  className="text-white hover:bg-white/10"
+                >
+                  <VolumeX aria-hidden className="size-4" />
+                  Hentikan
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-white/10 bg-black/10 px-5 py-3 md:px-6">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setShowVisualPrompt((current) => !current)}
+            aria-expanded={showVisualPrompt}
+            className="min-h-9 px-2 text-emerald-50 hover:bg-white/10"
+          >
+            <FileText aria-hidden className="size-4" />
+            {showVisualPrompt ? "Sembunyikan teks" : "Lihat teks soal"}
+          </Button>
+        </div>
+        {speechError ? (
+          <p
+            role="alert"
+            className="border-t border-red-300/20 bg-red-950/30 px-5 py-3 text-sm text-red-100 md:px-6"
+          >
+            {speechError}
+          </p>
+        ) : null}
+        {showVisualPrompt ? (
+          <div
+            className="quran-text min-h-44 border-t border-white/10 bg-[#fbfaf4] p-5 text-right text-4xl text-[var(--foreground)] md:p-6 md:text-5xl"
+            translate="no"
+            lang="ar"
+            dir="rtl"
+          >
+            {question.fragmentText}
+            <span aria-hidden className="text-[var(--accent)]">
+              {" "}
+              ...
+            </span>
+          </div>
+        ) : null}
+      </section>
       {questionComplete ? (
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-          Soal ini sudah dievaluasi: {assessmentLabel(question.assessment)}
+        <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+          <CheckCircle2 aria-hidden className="size-4 shrink-0" />
+          <span>
+            Soal ini sudah dievaluasi: {assessmentLabel(question.assessment)}
+          </span>
         </div>
       ) : null}
       {pendingAssessment ? (

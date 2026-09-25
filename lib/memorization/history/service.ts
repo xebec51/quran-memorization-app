@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { paginateByCursor } from "@/lib/db/cursor-pagination";
 import { measureServerTiming } from "@/lib/performance/timing";
+import { scopeLabel } from "../cycle/plan";
 import type { RevealedAyah } from "../types";
 
 const packageHistorySelect = {
@@ -11,7 +12,7 @@ const packageHistorySelect = {
   state: true,
   createdAt: true,
   completedAt: true,
-  cycle: { select: { cycleNumber: true } },
+  cycle: { select: { cycleNumber: true, scope: true } },
   questions: {
     orderBy: { orderInPackage: "asc" },
     select: {
@@ -47,6 +48,8 @@ export async function getPackageHistory(
       (pkg) => ({
         id: pkg.id,
         cycleNumber: pkg.cycle.cycleNumber,
+        scope: pkg.cycle.scope,
+        scopeLabel: scopeLabel(pkg.cycle.scope),
         packageNumber: pkg.packageNumber,
         state: pkg.state,
         createdAt: pkg.createdAt,
