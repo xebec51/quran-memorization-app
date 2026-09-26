@@ -58,16 +58,9 @@ test("critical memorization flow", async ({
   // shortcut anymore, so "Evaluasi jawaban" must not be visible yet.
   await expect(page.getByText("Evaluasi jawaban")).toHaveCount(0);
 
-  // Question 1: exercise every hint type (independent of reveal progress),
-  // then reveal fully and grade "Lancar".
-  await page.getByRole("button", { name: "Juz" }).click();
-  await expect(page.getByText(/Petunjuk Juz/)).toBeVisible();
-
-  await page.getByRole("button", { name: "Surah" }).click();
-  await expect(page.getByText(/Petunjuk Surah/)).toBeVisible();
-
-  await page.getByRole("button", { name: "Tambah" }).click();
-  await expect(page.getByText(/Fragmen/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Juz" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Surah" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tambah" })).toHaveCount(0);
 
   // While attempting to switch to another question before this one's
   // reveal is complete is disallowed: the other question buttons are

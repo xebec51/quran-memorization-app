@@ -26,8 +26,7 @@ export async function getPromptAudioClip(
     where: { id: questionId, userId },
     select: {
       id: true,
-      anchorVerseKey: true,
-      visibleWordCount: true
+      anchorVerseKey: true
     }
   });
   if (!question) throw notFoundError();
@@ -43,10 +42,7 @@ export async function getPromptAudioClip(
     throw promptAudioUnavailableError();
   }
 
-  const segment = segmentForWordCount(
-    audioFile.segments as Segment[],
-    question.visibleWordCount
-  );
+  const segment = fullAyahSegment(audioFile.segments as Segment[]);
 
   return {
     questionId,
@@ -58,17 +54,11 @@ export async function getPromptAudioClip(
   };
 }
 
-function segmentForWordCount(
-  segments: readonly Segment[],
-  visibleWordCount: number
-) {
-  const safeWordCount = Math.max(1, visibleWordCount);
+function fullAyahSegment(segments: readonly Segment[]) {
   const first = segments[0];
-  const lastVisible =
-    segments.find((segment) => segment[1] >= safeWordCount) ??
-    segments[segments.length - 1];
+  const last = segments[segments.length - 1];
   return {
     startMs: first[2],
-    endMs: lastVisible[3]
+    endMs: last[3]
   };
 }

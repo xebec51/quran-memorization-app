@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  BookMarked,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -10,8 +9,6 @@ import {
   FastForward,
   FileText,
   Headphones,
-  Lightbulb,
-  MapPinned,
   Play,
   Volume2,
   VolumeX
@@ -44,20 +41,11 @@ type RevealProgress = {
   verses: RevealedAyah[];
 };
 
-type HintLine = { type: string; text: string };
-
 type Question = {
   id: string;
   order: number;
   totalQuestions: number;
   fragmentText: string;
-  availableHints: {
-    juz: boolean;
-    surah: boolean;
-    extendFragment: boolean;
-    nextVerse: boolean;
-  };
-  hints: HintLine[];
   reveal: RevealProgress;
   assessment: Assessment | null;
 };
@@ -86,15 +74,7 @@ type PackageDto = {
   activeQuestionId: string | null;
 };
 
-type PendingAction =
-  "package" | "reveal" | "reveal-all" | `hint:${string}` | null;
-
-type HintMutation = {
-  questionId: string;
-  hint: { type: string; text: string };
-  availableHints: Question["availableHints"];
-  fragmentText?: string;
-};
+type PendingAction = "package" | "reveal" | "reveal-all" | null;
 
 type RevealMutation = RevealProgress & { questionId: string };
 
@@ -244,47 +224,6 @@ export function MemorizationApp({
     const previousScope = pkg?.cycle.scope;
     setSelectedScope(scope);
     await loadPackageForScope(scope, previousScope);
-  }
-
-  async function requestHint(type: string) {
-    if (!question || !beginAction(`hint:${type}`)) return;
-    try {
-      const data = await apiFetch<HintMutation>("/api/memorization/hint", {
-        questionId: question.id,
-        type
-      });
-      setPkg((current) =>
-        current
-          ? {
-              ...current,
-              questions: current.questions.map((item) =>
-                item.id === data.questionId
-                  ? {
-                      ...item,
-                      availableHints: data.availableHints,
-                      fragmentText: data.fragmentText ?? item.fragmentText,
-                      hints: [
-                        ...item.hints.filter(
-                          (hint) =>
-                            !(
-                              hint.type === data.hint.type &&
-                              data.hint.type !== "EXTEND_FRAGMENT" &&
-                              data.hint.type !== "NEXT_VERSE"
-                            )
-                        ),
-                        { type: data.hint.type, text: data.hint.text }
-                      ]
-                    }
-                  : item
-              )
-            }
-          : current
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Gagal meminta petunjuk.");
-    } finally {
-      endAction();
-    }
   }
 
   function applyRevealMutation(data: RevealMutation) {
@@ -594,7 +533,6 @@ export function MemorizationApp({
           pendingAction={pendingAction}
           canUseQuestionActions={canUseQuestionActions}
           pendingAssessment={pendingAssessments[question.id] ?? null}
-          onHint={requestHint}
           onRevealNext={revealNext}
           onRevealAll={revealAll}
           onAssess={assess}
@@ -732,7 +670,6 @@ function QuestionPanel({
   pendingAction,
   canUseQuestionActions,
   pendingAssessment,
-  onHint,
   onRevealNext,
   onRevealAll,
   onAssess
@@ -741,7 +678,6 @@ function QuestionPanel({
   pendingAction: PendingAction;
   canUseQuestionActions: boolean;
   pendingAssessment: PendingAssessment | null;
-  onHint: (type: string) => void;
   onRevealNext: () => void;
   onRevealAll: () => void;
   onAssess: (belCount: number, tuntunCount: number) => void;
@@ -943,62 +879,6 @@ function QuestionPanel({
           {pendingAssessment.belCount}, tuntun {pendingAssessment.tuntunCount})
         </div>
       ) : null}
-      <div className="grid gap-2 sm:grid-cols-3">
-        <Button
-          variant="secondary"
-          disabled={!canUseQuestionActions || !question.availableHints.juz}
-          onClick={() => onHint("JUZ")}
-        >
-          <MapPinned aria-hidden className="h-4 w-4" /> Juz
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={!canUseQuestionActions || !question.availableHints.surah}
-          onClick={() => onHint("SURAH")}
-        >
-          <BookMarked aria-hidden className="h-4 w-4" /> Surah
-        </Button>
-        <Button
-          variant="secondary"
-          disabled={
-            !canUseQuestionActions || !question.availableHints.extendFragment
-          }
-          onClick={() => onHint("EXTEND_FRAGMENT")}
-        >
-          <Lightbulb aria-hidden className="h-4 w-4" /> Tambah
-        </Button>
-      </div>
-      {question.hints.length ? (
-        <div className="grid gap-2 tasmiq-panel-enter">
-          {question.hints.map((hint, index) => (
-            <div
-              key={`${hint.type}-${index}`}
-              className="rounded-md bg-slate-50 p-3 text-sm"
-            >
-              <span className="font-medium">{hintLabel(hint.type)}: </span>
-              <span
-                className={
-                  hint.type === "EXTEND_FRAGMENT" || hint.type === "NEXT_VERSE"
-                    ? "quran-text text-xl"
-                    : ""
-                }
-                translate={
-                  hint.type === "EXTEND_FRAGMENT" || hint.type === "NEXT_VERSE"
-                    ? "no"
-                    : undefined
-                }
-                dir={
-                  hint.type === "EXTEND_FRAGMENT" || hint.type === "NEXT_VERSE"
-                    ? "rtl"
-                    : undefined
-                }
-              >
-                {hint.text}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
       {reveal.verses.length > 0 ? (
         <div className="grid gap-3 rounded-md border border-[var(--border)] p-4 tasmiq-panel-enter">
           <p className="text-sm text-[var(--muted)]">
@@ -1060,13 +940,6 @@ function QuestionPanel({
       ) : null}
     </div>
   );
-}
-
-function hintLabel(type: string) {
-  if (type === "JUZ") return "Petunjuk Juz";
-  if (type === "SURAH") return "Petunjuk Surah";
-  if (type === "EXTEND_FRAGMENT") return "Fragmen";
-  return "Ayat berikutnya";
 }
 
 function assessmentLabel(assessment: Assessment | null) {
