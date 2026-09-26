@@ -1,6 +1,6 @@
-import { createServerClient } from "@quranjs/api/server";
 import type { PageNumber, Verse } from "@quranjs/api";
 import type { ProviderChapter, ProviderVerse, QuranProvider } from "./types";
+import { createQuranFoundationServerClient } from "../server-client";
 
 /**
  * Only ever instantiated by scripts/sync-quran.ts, run standalone via tsx -
@@ -10,29 +10,7 @@ import type { ProviderChapter, ProviderVerse, QuranProvider } from "./types";
  * would break this exact script.
  */
 export class QuranFoundationProvider implements QuranProvider {
-  private clientId = process.env.QF_CLIENT_ID ?? "";
-  private clientSecret = process.env.QF_CLIENT_SECRET ?? "";
-  private qfEnv =
-    process.env.QF_ENV === "production" ? "production" : "prelive";
-
-  private client = createServerClient({
-    clientId: this.clientId,
-    clientSecret: this.clientSecret,
-    services:
-      this.qfEnv === "production"
-        ? {
-            tokenHost: "https://oauth2.quran.foundation",
-            oauth2BaseUrl: "https://oauth2.quran.foundation",
-            contentBaseUrl: "https://apis.quran.foundation/content",
-            searchBaseUrl: "https://apis.quran.foundation/search"
-          }
-        : {
-            tokenHost: "https://prelive-oauth2.quran.foundation",
-            oauth2BaseUrl: "https://prelive-oauth2.quran.foundation",
-            contentBaseUrl: "https://apis-prelive.quran.foundation/content",
-            searchBaseUrl: "https://apis-prelive.quran.foundation/search"
-          }
-  });
+  private client = createQuranFoundationServerClient();
 
   async getChapters(): Promise<ProviderChapter[]> {
     const chapters = await this.client.content.v4.chapters.list();

@@ -5,12 +5,12 @@ import {
   BookMarked,
   Check,
   CheckCircle2,
+  ChevronDown,
   Eye,
   FastForward,
   FileText,
   Headphones,
   Lightbulb,
-  Layers3,
   MapPinned,
   Play,
   Volume2,
@@ -60,6 +60,15 @@ type Question = {
   hints: HintLine[];
   reveal: RevealProgress;
   assessment: Assessment | null;
+};
+
+type PromptAudioClip = {
+  questionId: string;
+  reciterName: string;
+  audioUrl: string;
+  startMs: number;
+  endMs: number;
+  format: string;
 };
 
 type PackageDto = {
@@ -456,7 +465,7 @@ export function MemorizationApp({
           </div>
         </div>
         <Card className="grid gap-6 p-5 md:p-6">
-          <ScopeSelector
+          <ScopeDropdown
             value={selectedScope}
             disabled={pendingAction !== null}
             onChange={setSelectedScope}
@@ -494,7 +503,7 @@ export function MemorizationApp({
   if (packageComplete) {
     return (
       <div className="grid gap-4 pb-24">
-        <ScopeSwitcher
+        <ScopeDropdown
           value={pkg.cycle.scope}
           loadingValue={pendingAction === "package" ? selectedScope : null}
           disabled={scopeSwitchDisabled}
@@ -530,7 +539,7 @@ export function MemorizationApp({
 
   return (
     <div className="grid gap-4 pb-24">
-      <ScopeSwitcher
+      <ScopeDropdown
         value={pkg.cycle.scope}
         loadingValue={pendingAction === "package" ? selectedScope : null}
         disabled={scopeSwitchDisabled}
@@ -595,109 +604,58 @@ export function MemorizationApp({
   );
 }
 
-function ScopeSelector({
+function ScopeDropdown({
   value,
+  loadingValue = null,
   disabled,
   onChange
 }: {
   value: MemorizationScope;
+  loadingValue?: MemorizationScope | null;
   disabled: boolean;
   onChange: (scope: MemorizationScope) => void;
 }) {
-  return (
-    <fieldset className="grid gap-3" disabled={disabled}>
-      <legend className="text-lg font-semibold">Pilih cakupan hafalan</legend>
-      <div className="grid gap-3 md:grid-cols-3">
-        {scopeOptions.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={value === option.value}
-            onClick={() => onChange(option.value)}
-            className={`relative min-h-32 rounded-md border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-55 ${
-              value === option.value
-                ? "border-[var(--primary)] bg-emerald-50 shadow-sm"
-                : "border-[var(--border)] bg-white hover:border-slate-300 hover:bg-slate-50"
-            }`}
-          >
-            <span className="flex items-start justify-between gap-3">
-              <span>
-                <span className="block text-lg font-semibold">
-                  {option.label}
-                </span>
-                <span className="mt-0.5 block text-xs font-medium uppercase text-[var(--muted)]">
-                  {option.description}
-                </span>
-              </span>
-              <span
-                className={`flex size-6 shrink-0 items-center justify-center rounded-full border ${
-                  value === option.value
-                    ? "border-[var(--primary)] bg-[var(--primary)] text-white"
-                    : "border-[var(--border)] bg-white text-transparent"
-                }`}
-              >
-                <Check aria-hidden className="size-3.5" />
-              </span>
-            </span>
-            <span className="mt-4 block text-sm leading-5 text-[var(--muted)]">
-              {option.distribution}
-            </span>
-            <span className="mt-2 block text-xs font-medium text-[var(--primary)]">
-              Paket penuh: 4 soal
-            </span>
-          </button>
-        ))}
-      </div>
-    </fieldset>
+  const selectedOption =
+    scopeOptions.find((option) => option.value === value) ?? scopeOptions[0];
+  const loadingOption = scopeOptions.find(
+    (option) => option.value === loadingValue
   );
-}
 
-function ScopeSwitcher({
-  value,
-  loadingValue,
-  disabled,
-  onChange
-}: {
-  value: MemorizationScope;
-  loadingValue: MemorizationScope | null;
-  disabled: boolean;
-  onChange: (scope: MemorizationScope) => void;
-}) {
   return (
-    <section className="grid gap-3 rounded-md border border-[var(--border)] bg-white p-3 shadow-sm sm:grid-cols-[auto_1fr] sm:items-center">
-      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
-        <Layers3 aria-hidden className="size-4 text-[var(--primary)]" />
-        Kategori
+    <section className="grid gap-3 rounded-md border border-[var(--border)] bg-white p-4 shadow-sm sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)] sm:items-center">
+      <div>
+        <p className="text-sm font-semibold text-[var(--foreground)]">
+          Kategori hafalan
+        </p>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {loadingOption
+            ? `Memuat ${loadingOption.label}...`
+            : selectedOption.distribution}
+        </p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-3" aria-label="Kategori hafalan">
-        {scopeOptions.map((option) => {
-          const active = value === option.value;
-          const loading =
-            loadingValue === option.value && loadingValue !== value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={active}
-              disabled={disabled || active}
-              onClick={() => onChange(option.value)}
-              className={`min-h-12 rounded-md border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-70 ${
-                active
-                  ? "border-[var(--primary)] bg-emerald-50 text-[var(--primary)]"
-                  : "border-[var(--border)] bg-white hover:border-slate-300 hover:bg-slate-50"
-              }`}
-            >
-              <span className="flex items-center justify-between gap-2">
-                <span className="font-semibold">{option.label}</span>
-                {active ? <Check aria-hidden className="size-4" /> : null}
-              </span>
-              <span className="mt-0.5 block text-xs text-[var(--muted)]">
-                {loading ? "Memuat kategori..." : option.description}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <label className="grid gap-1 text-sm font-medium">
+        <span className="sr-only">Pilih cakupan hafalan</span>
+        <span className="relative">
+          <select
+            value={loadingValue ?? value}
+            disabled={disabled}
+            onChange={(event) =>
+              onChange(event.target.value as MemorizationScope)
+            }
+            className="h-11 w-full appearance-none rounded-md border border-[var(--border)] bg-white px-3 pr-10 font-semibold text-[var(--foreground)] shadow-sm outline-none transition focus:border-[var(--primary)] focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {scopeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label} - {option.description}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            aria-hidden
+            className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]"
+          />
+        </span>
+      </label>
     </section>
   );
 }
@@ -791,8 +749,11 @@ function QuestionPanel({
   const questionComplete = question.assessment !== null;
   const reveal = question.reveal;
   const [showVisualPrompt, setShowVisualPrompt] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
-  const [speechError, setSpeechError] = useState<string | null>(null);
+  const [isPlayingPrompt, setIsPlayingPrompt] = useState(false);
+  const [promptAudio, setPromptAudio] = useState<PromptAudioClip | null>(null);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioFrameRef = useRef<number | null>(null);
   // Grading is only allowed once the entire boundary has been revealed -
   // enforced again server-side in submitAssessment - so there is no
   // separate "grade early" affordance; this panel simply appears once
@@ -807,38 +768,84 @@ function QuestionPanel({
 
   useEffect(() => {
     return () => {
-      window.speechSynthesis?.cancel();
+      stopPrompt();
     };
   }, [question.id]);
 
-  function speakPrompt() {
-    if (!("speechSynthesis" in window)) {
-      setSpeechError("Audio tidak tersedia di browser ini.");
+  async function playPrompt() {
+    stopPrompt();
+    setAudioError(null);
+    try {
+      const clip = await apiFetch<PromptAudioClip>(
+        "/api/memorization/audio",
+        { questionId: question.id },
+        { timeoutMs: 20_000 }
+      );
+      setPromptAudio(clip);
+      await playClip(clip);
+    } catch (err) {
+      setIsPlayingPrompt(false);
+      setAudioError(
+        err instanceof Error ? err.message : "Audio soal gagal diputar."
+      );
       setShowVisualPrompt(true);
-      return;
     }
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(question.fragmentText);
-    utterance.lang = "ar-SA";
-    utterance.rate = 0.82;
-    const arabicVoice = window.speechSynthesis
-      .getVoices()
-      .find((voice) => voice.lang.toLowerCase().startsWith("ar"));
-    if (arabicVoice) utterance.voice = arabicVoice;
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => {
-      setIsSpeaking(false);
-      setSpeechError("Audio gagal diputar. Gunakan teks soal.");
-      setShowVisualPrompt(true);
+  }
+
+  async function playClip(clip: PromptAudioClip) {
+    const audio = new Audio(clip.audioUrl);
+    audio.preload = "auto";
+    audioRef.current = audio;
+    const startSeconds = clip.startMs / 1000;
+    const endSeconds = clip.endMs / 1000;
+
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        audio.removeEventListener("loadedmetadata", onReady);
+        audio.removeEventListener("canplay", onReady);
+        audio.removeEventListener("error", onError);
+      };
+      const onReady = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error("Audio syeikh gagal dimuat."));
+      };
+      audio.addEventListener("loadedmetadata", onReady, { once: true });
+      audio.addEventListener("canplay", onReady, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+      audio.load();
+    });
+
+    audio.currentTime = startSeconds;
+    audio.onended = () => setIsPlayingPrompt(false);
+    await audio.play();
+    setIsPlayingPrompt(true);
+
+    const stopAtEnd = () => {
+      if (audioRef.current !== audio) return;
+      if (audio.currentTime >= endSeconds) {
+        stopPrompt();
+        return;
+      }
+      audioFrameRef.current = window.requestAnimationFrame(stopAtEnd);
     };
-    setSpeechError(null);
-    setIsSpeaking(true);
-    window.speechSynthesis.speak(utterance);
+    audioFrameRef.current = window.requestAnimationFrame(stopAtEnd);
   }
 
   function stopPrompt() {
-    window.speechSynthesis?.cancel();
-    setIsSpeaking(false);
+    if (audioFrameRef.current !== null) {
+      window.cancelAnimationFrame(audioFrameRef.current);
+      audioFrameRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = "";
+      audioRef.current = null;
+    }
+    setIsPlayingPrompt(false);
   }
 
   return (
@@ -846,7 +853,7 @@ function QuestionPanel({
       <section className="overflow-hidden rounded-md border border-[#27584b] bg-[#173b32] text-white shadow-sm">
         <div className="grid gap-5 p-5 sm:grid-cols-[auto_1fr] sm:items-center md:p-6">
           <div
-            className={`flex size-16 items-center justify-center rounded-full bg-white/10 text-[#f2bd62] ${isSpeaking ? "tasmiq-audio-active" : ""}`}
+            className={`flex size-16 items-center justify-center rounded-full bg-white/10 text-[#f2bd62] ${isPlayingPrompt ? "tasmiq-audio-active" : ""}`}
           >
             <Headphones aria-hidden className="size-8" />
           </div>
@@ -857,19 +864,23 @@ function QuestionPanel({
             <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h2 className="text-xl font-semibold">Audio soal</h2>
               <span className="text-sm text-emerald-100" aria-live="polite">
-                {isSpeaking ? "Sedang diputar" : "Siap diputar"}
+                {isPlayingPrompt
+                  ? "Sedang diputar"
+                  : promptAudio?.questionId === question.id
+                    ? promptAudio.reciterName
+                    : "Suara syeikh"}
               </span>
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                onClick={speakPrompt}
+                onClick={playPrompt}
                 className="bg-white text-[#173b32] hover:bg-emerald-50"
               >
                 <Volume2 aria-hidden className="size-4" />
-                {isSpeaking ? "Putar ulang" : "Putar soal"}
+                {isPlayingPrompt ? "Putar ulang" : "Putar soal"}
               </Button>
-              {isSpeaking ? (
+              {isPlayingPrompt ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -895,12 +906,12 @@ function QuestionPanel({
             {showVisualPrompt ? "Sembunyikan teks" : "Lihat teks soal"}
           </Button>
         </div>
-        {speechError ? (
+        {audioError ? (
           <p
             role="alert"
             className="border-t border-red-300/20 bg-red-950/30 px-5 py-3 text-sm text-red-100 md:px-6"
           >
-            {speechError}
+            {audioError}
           </p>
         ) : null}
         {showVisualPrompt ? (

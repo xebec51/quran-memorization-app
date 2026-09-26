@@ -34,6 +34,12 @@ export const evaluationAttemptConflictError = () =>
     "Permintaan ini sudah pernah dikirim dengan data yang berbeda.",
     409
   );
+export const promptAudioUnavailableError = () =>
+  new DomainError(
+    "PROMPT_AUDIO_UNAVAILABLE",
+    "Audio syeikh untuk soal ini belum tersedia. Gunakan teks soal.",
+    503
+  );
 // Every StqhnPackage a user could be given has already been fully
 // assessed by them - see getOrAllocateStqhnPackage's doc comment on why
 // a genuine repeat attempt isn't offered here: MemorizationQuestion rows
