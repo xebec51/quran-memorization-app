@@ -4,14 +4,16 @@ Tasmiq — Latihan Musabaqah Hifzhil Qur'an.
 
 Uji hafalan. Kenali kelemahan. Siapkan musabaqah.
 
-A production-oriented Quran memorization web app in Bahasa Indonesia. The primary experience is Expert memorization testing with progressive hints, persistent cycles, history, analytics, and a simple Quran reader.
+A production-oriented Quran memorization web app in Bahasa Indonesia. The primary experience is memorization testing with progressive hints, persistent cycles, history, analytics, and a simple Quran reader.
 
 ## Core Features
 
-- Expert is the only memorization difficulty.
-- Each package contains exactly 4 questions.
-- Every package covers Juz 1-10, Juz 11-20, and Juz 21-30, plus one quota-safe wildcard.
-- A full cycle consumes all 604 Madani Mushaf pages exactly once as primary question pages.
+- Main practice supports 10, 20, and 30 Juz categories.
+- Each full package contains 4 questions, with a shorter final remainder package when needed to finish a no-repeat category cycle.
+- 30 Juz packages cover Juz 1-10, Juz 11-20, Juz 21-30, plus one quota-safe wildcard.
+- 20 Juz packages contain 2 questions from Juz 1-10 and 2 questions from Juz 11-20.
+- 10 Juz packages contain one question from each quarter of Juz 1-10.
+- A category cycle consumes every included Madani Mushaf page exactly once as a primary question page before repeating.
 - Hints: Juz, Surah, and progressive fragment extension.
 - Question prompts always begin at the first word of the selected ayah while still varying the represented page area.
 - Progressive answer reveal (one ayah per click, through the whole next Mushaf page, or all at once via "Soal selesai dijawab") and objective MHQ-style self-assessment: enter bel/tuntun counts to derive one of two classifications - `Lancar` for 0/0 and `Belum Lancar` for any nonzero count. A `Belum Lancar` question is marked for re-evaluation.

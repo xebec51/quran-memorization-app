@@ -95,7 +95,7 @@ test("critical memorization flow", async ({
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await submitBelTuntun(page, 0, 0);
   await expect(
-    page.getByRole("heading", { name: "Latihan Expert" })
+    page.getByRole("heading", { name: "Latihan hafalan" })
   ).toBeVisible();
 
   // Questions 2-4: reveal fully then submit bel/tuntun counts - 0/0
@@ -105,7 +105,7 @@ test("critical memorization flow", async ({
   await expect(page.getByText("Evaluasi jawaban")).toBeVisible();
   await submitBelTuntun(page, 1, 0);
   await expect(
-    page.getByRole("heading", { name: "Latihan Expert" })
+    page.getByRole("heading", { name: "Latihan hafalan" })
   ).toBeVisible();
 
   await revealFully(page);
@@ -234,7 +234,7 @@ test("'Soal selesai dijawab' reveals everything and opens grading without manual
 
   await submitBelTuntun(page, 0, 0);
   await expect(
-    page.getByRole("heading", { name: "Latihan Expert" })
+    page.getByRole("heading", { name: "Latihan hafalan" })
   ).toBeVisible();
 });
 

@@ -519,6 +519,12 @@ async function allocatePackage(
       tx,
       planPackage.questions.map((question) => question.pageNumber)
     );
+    const previouslyTestedAnchorVerseIds =
+      await anchorVerseIdsAlreadyTestedByUser(
+        tx,
+        userId,
+        planPackage.questions.map((question) => question.pageNumber)
+      );
 
     const sources = planPackage.questions.map((planned, index) => {
       const words = wordsByPage.get(planned.pageNumber);
@@ -529,6 +535,7 @@ async function allocatePackage(
         assignedBand: planned.juzBand,
         words,
         preferredBucket: nextBucket(index),
+        previouslyTestedAnchorVerseIds,
         rng: new CryptoRandomSource()
       });
     });
@@ -704,6 +711,21 @@ async function wordRefsForPackagePages(
     );
   }
   return result;
+}
+
+async function anchorVerseIdsAlreadyTestedByUser(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  pageNumbers: readonly number[]
+) {
+  const rows = await tx.memorizationQuestion.findMany({
+    where: {
+      userId,
+      primaryPageNumber: { in: [...new Set(pageNumbers)] }
+    },
+    select: { anchorVerseId: true }
+  });
+  return new Set(rows.map((row) => row.anchorVerseId));
 }
 
 async function wordsForExtension(

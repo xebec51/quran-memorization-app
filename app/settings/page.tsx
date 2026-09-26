@@ -21,10 +21,6 @@ export default async function SettingsPage() {
           <dt className="text-[var(--muted)]">Email</dt>
           <dd className="font-medium">{user.email}</dd>
         </div>
-        <div>
-          <dt className="text-[var(--muted)]">Mode latihan</dt>
-          <dd className="font-medium">Expert</dd>
-        </div>
       </dl>
       <form action="/api/auth/logout" method="post" className="mt-5">
         <Button variant="secondary" type="submit">

@@ -1,6 +1,6 @@
 # Memorization Engine
 
-The only difficulty is `Expert`. Difficulty is adjusted by user-requested hints, not by separate easy/medium/hard modes.
+Main practice has no separate easy/medium/hard difficulty label. Challenge level is adjusted by category selection and user-requested hints.
 
 ## Cycle
 

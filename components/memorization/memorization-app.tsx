@@ -10,6 +10,7 @@ import {
   FileText,
   Headphones,
   Lightbulb,
+  Layers3,
   MapPinned,
   Play,
   Volume2,
@@ -200,21 +201,40 @@ export function MemorizationApp({
   }
 
   async function loadPackage() {
+    await loadPackageForScope(selectedScope);
+  }
+
+  async function loadPackageForScope(
+    scope: MemorizationScope,
+    resetScopeOnError?: MemorizationScope
+  ) {
     if (pendingAssessmentCount > 0 || !beginAction("package")) return;
     try {
       const data = await apiFetch<PackageDto>(
         "/api/memorization/next-package",
         {
-          scope: selectedScope
+          scope
         }
       );
       setPkg(data);
+      setSelectedScope(data.cycle.scope);
       setActiveIndex(firstActiveIndex(data));
     } catch (err) {
+      if (resetScopeOnError) setSelectedScope(resetScopeOnError);
       setError(err instanceof Error ? err.message : "Gagal memuat paket.");
     } finally {
       endAction();
     }
+  }
+
+  async function switchScope(scope: MemorizationScope) {
+    if (scope === pkg?.cycle.scope) {
+      setSelectedScope(scope);
+      return;
+    }
+    const previousScope = pkg?.cycle.scope;
+    setSelectedScope(scope);
+    await loadPackageForScope(scope, previousScope);
   }
 
   async function requestHint(type: string) {
@@ -468,22 +488,22 @@ export function MemorizationApp({
   }
 
   const assessedCount = pkg.questions.filter((item) => item.assessment).length;
+  const scopeSwitchDisabled =
+    pendingAction !== null || pendingAssessmentCount > 0;
 
   if (packageComplete) {
     return (
       <div className="grid gap-4 pb-24">
-        <ScopeSelector
-          value={selectedScope}
-          disabled={pendingAction !== null || pendingAssessmentCount > 0}
-          onChange={(scope) => {
-            setSelectedScope(scope);
-            setPkg(null);
-            setActiveIndex(0);
-          }}
+        <ScopeSwitcher
+          value={pkg.cycle.scope}
+          loadingValue={pendingAction === "package" ? selectedScope : null}
+          disabled={scopeSwitchDisabled}
+          onChange={switchScope}
         />
         <MemorizationHeader
           pkg={pkg}
           pendingAssessmentCount={pendingAssessmentCount}
+          switchingScope={pendingAction === "package"}
         />
         {error ? (
           <Card role="alert" className="text-sm text-[var(--danger)]">
@@ -510,9 +530,16 @@ export function MemorizationApp({
 
   return (
     <div className="grid gap-4 pb-24">
+      <ScopeSwitcher
+        value={pkg.cycle.scope}
+        loadingValue={pendingAction === "package" ? selectedScope : null}
+        disabled={scopeSwitchDisabled}
+        onChange={switchScope}
+      />
       <MemorizationHeader
         pkg={pkg}
         pendingAssessmentCount={pendingAssessmentCount}
+        switchingScope={pendingAction === "package"}
       />
       <div
         className="grid gap-2"
@@ -616,7 +643,7 @@ function ScopeSelector({
               {option.distribution}
             </span>
             <span className="mt-2 block text-xs font-medium text-[var(--primary)]">
-              4 soal per paket
+              Paket penuh: 4 soal
             </span>
           </button>
         ))}
@@ -625,17 +652,71 @@ function ScopeSelector({
   );
 }
 
+function ScopeSwitcher({
+  value,
+  loadingValue,
+  disabled,
+  onChange
+}: {
+  value: MemorizationScope;
+  loadingValue: MemorizationScope | null;
+  disabled: boolean;
+  onChange: (scope: MemorizationScope) => void;
+}) {
+  return (
+    <section className="grid gap-3 rounded-md border border-[var(--border)] bg-white p-3 shadow-sm sm:grid-cols-[auto_1fr] sm:items-center">
+      <div className="flex items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+        <Layers3 aria-hidden className="size-4 text-[var(--primary)]" />
+        Kategori
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3" aria-label="Kategori hafalan">
+        {scopeOptions.map((option) => {
+          const active = value === option.value;
+          const loading =
+            loadingValue === option.value && loadingValue !== value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={active}
+              disabled={disabled || active}
+              onClick={() => onChange(option.value)}
+              className={`min-h-12 rounded-md border px-3 py-2 text-left transition disabled:cursor-not-allowed disabled:opacity-70 ${
+                active
+                  ? "border-[var(--primary)] bg-emerald-50 text-[var(--primary)]"
+                  : "border-[var(--border)] bg-white hover:border-slate-300 hover:bg-slate-50"
+              }`}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className="font-semibold">{option.label}</span>
+                {active ? <Check aria-hidden className="size-4" /> : null}
+              </span>
+              <span className="mt-0.5 block text-xs text-[var(--muted)]">
+                {loading ? "Memuat kategori..." : option.description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function MemorizationHeader({
   pkg,
-  pendingAssessmentCount
+  pendingAssessmentCount,
+  switchingScope
 }: {
   pkg: PackageDto;
   pendingAssessmentCount: number;
+  switchingScope: boolean;
 }) {
-  const progress = Math.min(
-    100,
-    Math.round((pkg.cycle.pagesTested / pkg.cycle.targetPages) * 100)
-  );
+  const pagesTested = finiteNonNegative(pkg.cycle.pagesTested);
+  const targetPages = finiteNonNegative(pkg.cycle.targetPages);
+  const progress =
+    targetPages > 0
+      ? Math.min(100, Math.round((pagesTested / targetPages) * 100))
+      : 0;
 
   return (
     <div className="grid gap-3 rounded-md border border-[var(--border)] bg-white p-4 shadow-sm md:grid-cols-[1fr_auto] md:items-center">
@@ -644,27 +725,30 @@ function MemorizationHeader({
           {scopeLabel(pkg.cycle.scope)} - Siklus {pkg.cycle.cycleNumber} - Paket{" "}
           {pkg.packageNumber}
         </p>
-        <h1 className="text-2xl font-semibold">Latihan Expert</h1>
+        <h1 className="text-2xl font-semibold">Latihan hafalan</h1>
         {pendingAssessmentCount > 0 ? (
           <p className="mt-1 text-sm text-[var(--muted)]">
             Menyimpan evaluasi...
+          </p>
+        ) : null}
+        {switchingScope ? (
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            Memuat kategori hafalan...
           </p>
         ) : null}
       </div>
       <div className="grid min-w-44 gap-2">
         <div className="flex items-center justify-between gap-3 text-xs font-medium text-[var(--muted)]">
           <span>Progres siklus</span>
-          <span>
-            {pkg.cycle.pagesTested}/{pkg.cycle.targetPages}
-          </span>
+          <span>{targetPages > 0 ? `${pagesTested}/${targetPages}` : "-"}</span>
         </div>
         <div
           className="h-2 overflow-hidden rounded-full bg-slate-100"
           role="progressbar"
           aria-label="Progres halaman dalam siklus"
           aria-valuemin={0}
-          aria-valuemax={pkg.cycle.targetPages}
-          aria-valuenow={pkg.cycle.pagesTested}
+          aria-valuemax={targetPages > 0 ? targetPages : 1}
+          aria-valuenow={Math.min(pagesTested, targetPages || 1)}
         >
           <div
             className="h-full rounded-full bg-[var(--accent)] transition-[width]"
@@ -672,11 +756,17 @@ function MemorizationHeader({
           />
         </div>
         <p className="text-right text-xs text-[var(--muted)]">
-          {progress}% halaman teruji
+          {targetPages > 0
+            ? `${progress}% halaman teruji`
+            : "Progres disiapkan"}
         </p>
       </div>
     </div>
   );
+}
+
+function finiteNonNegative(value: number) {
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 function QuestionPanel({

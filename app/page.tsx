@@ -9,14 +9,14 @@ export default function HomePage() {
     <div className="grid gap-8 pb-20 md:grid-cols-[1.15fr_0.85fr] md:items-center">
       <section className="py-6 md:py-12">
         <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--accent)]">
-          Mode {productConfig.difficultyName}
+          Latihan hafalan
         </p>
         <h1 className="max-w-3xl text-4xl font-semibold leading-tight md:text-6xl">
           {productConfig.fullTitle}
         </h1>
         <p className="mt-5 max-w-2xl text-lg leading-8 text-[var(--muted)]">
-          {productConfig.tagline} Setiap siklus menguji 604 halaman Madani
-          Mushaf tanpa pengulangan halaman utama.
+          {productConfig.tagline} Pilih cakupan 10, 20, atau 30 Juz dengan
+          siklus halaman utama tanpa pengulangan.
         </p>
         <div className="mt-7 flex flex-wrap gap-3">
           <Link href="/memorization">
@@ -33,13 +33,13 @@ export default function HomePage() {
         {[
           {
             icon: Brain,
-            title: "4 soal per paket",
-            text: "Setiap paket mencakup Juz 1-10, 11-20, 21-30, dan satu wildcard yang dihitung dengan kuota aman."
+            title: "Kategori fleksibel",
+            text: "Latihan utama bisa dijalankan untuk 10, 20, atau 30 Juz dengan distribusi soal yang sesuai."
           },
           {
             icon: Layers3,
-            title: "Siklus 604 halaman",
-            text: "Halaman utama tidak berulang sampai seluruh siklus selesai."
+            title: "Siklus tanpa ulang",
+            text: "Halaman utama tidak berulang sampai seluruh cakupan kategori selesai."
           },
           {
             icon: ShieldCheck,

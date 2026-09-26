@@ -14,6 +14,7 @@ export function generateQuestionSource(params: {
   assignedBand: JuzBand;
   words: readonly QuranWordRef[];
   preferredBucket: PagePositionBucket;
+  previouslyTestedAnchorVerseIds?: ReadonlySet<number>;
   rng: RandomSource;
 }): GeneratedQuestionSource {
   const pageWords = params.words
@@ -32,7 +33,8 @@ export function generateQuestionSource(params: {
     bucketWords,
     pageWords,
     allWords: params.words,
-    assignedBand: params.assignedBand
+    assignedBand: params.assignedBand,
+    previouslyTestedAnchorVerseIds: params.previouslyTestedAnchorVerseIds
   });
   const anchor = anchorCandidates[params.rng.int(0, anchorCandidates.length)];
   const sameVerseWords = params.words
@@ -88,6 +90,7 @@ function ayahStartCandidates(params: {
   pageWords: readonly QuranWordRef[];
   allWords: readonly QuranWordRef[];
   assignedBand: JuzBand;
+  previouslyTestedAnchorVerseIds?: ReadonlySet<number>;
 }) {
   const startsByVerse = new Map<number, QuranWordRef>();
   for (const word of params.allWords) {
@@ -106,16 +109,34 @@ function ayahStartCandidates(params: {
     const start = startsByVerse.get(verseId);
     return start ? [start] : [];
   });
-  if (bucketStarts.length > 0) return bucketStarts;
+  if (bucketStarts.length > 0)
+    return preferUntestedStarts(
+      bucketStarts,
+      params.previouslyTestedAnchorVerseIds
+    );
 
   const pageStarts = [...pageVerseIds].flatMap((verseId) => {
     const start = startsByVerse.get(verseId);
     return start ? [start] : [];
   });
   if (pageStarts.length > 0)
-    return nearestStartsToBucket(params.bucketWords, pageStarts);
+    return preferUntestedStarts(
+      nearestStartsToBucket(params.bucketWords, pageStarts),
+      params.previouslyTestedAnchorVerseIds
+    );
 
   throw new Error("No ayah beginning is available for the selected page area");
+}
+
+function preferUntestedStarts(
+  starts: readonly QuranWordRef[],
+  previouslyTestedAnchorVerseIds?: ReadonlySet<number>
+) {
+  if (!previouslyTestedAnchorVerseIds?.size) return starts;
+  const freshStarts = starts.filter(
+    (word) => !previouslyTestedAnchorVerseIds.has(word.verseId)
+  );
+  return freshStarts.length > 0 ? freshStarts : starts;
 }
 
 function nearestStartsToBucket(

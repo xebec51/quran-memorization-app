@@ -73,6 +73,44 @@ describe("question generator", () => {
     ).toBeGreaterThan(1);
   });
 
+  it("prefers ayat that have not been used as prompts before", () => {
+    const denseWords = makeWords([
+      { verseId: 20, verseKey: "fixture:20", wordCount: 3 },
+      { verseId: 21, verseKey: "fixture:21", wordCount: 3 },
+      { verseId: 22, verseKey: "fixture:22", wordCount: 3 }
+    ]);
+
+    const question = generateQuestionSource({
+      primaryPageNumber: 1,
+      assignedBand: "A",
+      words: denseWords,
+      preferredBucket: "MIDDLE",
+      previouslyTestedAnchorVerseIds: new Set([20]),
+      rng: new SeededRandomSource("prefer-new-anchor")
+    });
+
+    expect(question.anchorVerseId).toBe(21);
+  });
+
+  it("falls back to a previously used ayah when every candidate was already tested", () => {
+    const denseWords = makeWords([
+      { verseId: 30, verseKey: "fixture:30", wordCount: 3 },
+      { verseId: 31, verseKey: "fixture:31", wordCount: 3 },
+      { verseId: 32, verseKey: "fixture:32", wordCount: 3 }
+    ]);
+
+    const question = generateQuestionSource({
+      primaryPageNumber: 1,
+      assignedBand: "A",
+      words: denseWords,
+      preferredBucket: "MIDDLE",
+      previouslyTestedAnchorVerseIds: new Set([30, 31]),
+      rng: new SeededRandomSource("fallback-used-anchor")
+    });
+
+    expect([30, 31]).toContain(question.anchorVerseId);
+  });
+
   it("keeps EXTEND_FRAGMENT as a contiguous continuation from the same ayah beginning", () => {
     const question = generateQuestionSource({
       primaryPageNumber: 1,
